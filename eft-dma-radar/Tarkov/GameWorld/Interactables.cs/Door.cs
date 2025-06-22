@@ -135,7 +135,13 @@ namespace eft_dma_radar.Tarkov.GameWorld.Interactables
             float distanceYOffset;
             float nameXOffset = 7f * MainWindow.UIScale;
             float nameYOffset;
+            canvas.Save();
 
+            // Create a matrix to counter-rotate around the loot item's icon position.
+            // 'point' before it's offset is the center of the icon.
+            var iconCenterPoint = Position.ToMapPos(mapParams.Map).ToZoomedPos(mapParams);
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, iconCenterPoint.X, iconCenterPoint.Y);
+            canvas.Concat(ref counterRotation);
             if (heightDiff > HEIGHT_INDICATOR_THRESHOLD)
             {
                 using var path = point.GetUpArrow(5f);
@@ -179,6 +185,7 @@ namespace eft_dma_radar.Tarkov.GameWorld.Interactables
                 canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
                 canvas.DrawText(distText, distPoint, paint.Item2);
             }
+            canvas.Restore();
         }
 
         private ValueTuple<SKPaint, SKPaint> GetPaints()

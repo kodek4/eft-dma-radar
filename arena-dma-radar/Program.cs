@@ -39,7 +39,7 @@ using MessageBox = HandyControl.Controls.MessageBox;
 
 [assembly: AssemblyTitle(Program.Name)]
 [assembly: AssemblyProduct(Program.Name)]
-[assembly: AssemblyCopyright("BSD Zero Clause License ©2025 lone-dma")]
+[assembly: AssemblyCopyright("BSD Zero Clause License ï¿½2025 lone-dma")]
 [assembly: AssemblyDescription("Advanced DMA radar for Escape from Tarkov: Arena")]
 [assembly: AssemblyCompany("lone-dma")]
 [assembly: AssemblyConfiguration("")]

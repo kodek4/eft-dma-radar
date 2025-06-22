@@ -7,7 +7,7 @@
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:local="clr-namespace:eft_dma_radar.UI.Pages"
            mc:Ignorable="d"
-        Title="EFT DMA Radar"
+        Title="EFT DMA Radar | NikitaGay Edition"
         ShowTitle="False"
         WindowStartupLocation="CenterScreen"
         Height="720" 
@@ -27,17 +27,33 @@
     </hc:Window.NonClientAreaContent>
 
     <Grid>
-        <Grid Name="mainContentGrid" Margin="0,0,0,0">
-            <skia:SKGLElement x:Name="skCanvas"/>
+        <Grid Name="mainContentGrid" Margin="0,0,0,0" Background="LimeGreen">
+
+            <skia:SKGLElement x:Name="skCanvas">
+                <skia:SKGLElement.LayoutTransform>
+                    <RotateTransform x:Name="skCanvasRotation" Angle="0" 
+                         CenterX="{Binding ActualWidth, ElementName=skCanvas, Converter={StaticResource DivideByTwoConverter}}"
+                         CenterY="{Binding ActualHeight, ElementName=skCanvas, Converter={StaticResource DivideByTwoConverter}}"/>
+                </skia:SKGLElement.LayoutTransform>
+            </skia:SKGLElement>
+
+
         </Grid>
 
-        <Canvas Name="ToolbarCanvas" Panel.ZIndex="1500">
+        <!-- Separate canvas for widgets - NOT affected by rotation -->
+        <Canvas Name="WidgetCanvas" Panel.ZIndex="1400" HorizontalAlignment="Stretch" 
+        VerticalAlignment="Stretch" IsHitTestVisible="True">
+            <!-- Widgets will be added here programmatically -->
+        </Canvas>
+
+        <Canvas Name="ToolbarCanvas" Panel.ZIndex="1500" HorizontalAlignment="Stretch" 
+        VerticalAlignment="Stretch">
             <Border x:Name="customToolbar"
             Background="{DynamicResource RegionBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
-            Canvas.Left="900" Canvas.Top="5"
+            Canvas.Right="5" Canvas.Top="5"
             Padding="5,2" CornerRadius="4"
-            Height="30">
+            Height="36">
                 <Border.Effect>
                     <DropShadowEffect ShadowDepth="2" Opacity="0.3" BlurRadius="5"/>
                 </Border.Effect>
@@ -166,6 +182,20 @@
 
                     <Rectangle Width="1" Height="24" Fill="{DynamicResource BorderBrush}" Opacity="0.7" Margin="3,0"/>
 
+                    <Button x:Name="btnRotate"
+                            Style="{StaticResource ButtonIcon}"
+                            ToolTip="Rotate Map (90°)"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Width="32"
+                            Height="32"
+                            Padding="6"
+                            hc:IconElement.Width="18"
+                            hc:IconElement.Geometry="{StaticResource ArrowsRotateGeometry}"
+                            Click="btnRotate_Click"/>
+
+                    <Rectangle Width="1" Height="24" Fill="{DynamicResource BorderBrush}" Opacity="0.7" Margin="3,0"/>
+
                     <Button x:Name="btnRestart" 
                             Style="{StaticResource ButtonIcon}" 
                             ToolTip="Restarts the Radar for the current raid instance"
@@ -174,10 +204,8 @@
                             Width="32" Height="32"
                             Padding="6"
                             hc:IconElement.Width="18"
-                            hc:IconElement.Geometry="{StaticResource ArrowsRotateGeometry}"
+                            hc:IconElement.Geometry="{StaticResource RotateRightGeometry}"
                             Click="btnRestart_Click"/>
-
-                    <Rectangle Width="1" Height="24" Fill="{DynamicResource BorderBrush}" Opacity="0.7" Margin="3,0"/>
 
                     <!--ESP / Cham preview panel-->
                     <Button x:Name="btnPlayerPreview" Visibility="Collapsed"
@@ -369,4 +397,5 @@
                         VerticalAlignment="Bottom"/>
         </ScrollViewer>
     </Grid>
+    
 </hc:Window>

@@ -171,6 +171,13 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
             var distanceYOffset = 20f * MainWindow.UIScale;
             var nameXOffset = 10f * MainWindow.UIScale;
             var nameYOffset = 4f * MainWindow.UIScale;
+            canvas.Save();
+
+            // Create a matrix to counter-rotate around the loot item's icon position.
+            // 'point' before it's offset is the center of the icon.
+            var iconCenterPoint = Position.ToMapPos(mapParams.Map).ToZoomedPos(mapParams);
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, iconCenterPoint.X, iconCenterPoint.Y);
+            canvas.Concat(ref counterRotation);
 
             if (Settings.ShowName && !string.IsNullOrEmpty(Name))
             {
@@ -190,6 +197,7 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
                 canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
                 canvas.DrawText(distText, distPoint, textPaintToUse);
             }
+            canvas.Restore();
         }
 
         public void DrawESP(SKCanvas canvas, LocalPlayer localPlayer)

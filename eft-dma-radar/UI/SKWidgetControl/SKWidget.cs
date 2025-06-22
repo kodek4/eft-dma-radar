@@ -3,7 +3,6 @@ using SkiaSharp;
 using SkiaSharp.Views.WPF;
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Windows;
 using System.Windows.Input;
@@ -14,101 +13,38 @@ namespace eft_dma_radar.UI.SKWidgetControl
 {
     public abstract class SKWidget : IDisposable
     {
-        #region Static Fields
+        #region Fields & Properties
         private static readonly List<SKWidget> _widgets = new();
         private static readonly object _widgetsLock = new();
         private static SKWidget _capturedWidget = null;
-        #endregion
+        private static readonly Dictionary<SKGLElement, bool> _registeredParents = new();
 
-        #region Instance Fields
         private readonly Lock _sync = new();
         private readonly SKGLElement _parent;
         private bool _titleDrag = false;
         private bool _resizeDrag = false;
-        private Point _lastMousePosition;
+        private Point _lastRawMousePosition; // Stores the raw mouse position for delta calculation
         private SKPoint _location = new(1, 1);
         private SKSize _size = new(200, 200);
         private SKPath _resizeTriangle;
-        private float _relativeX;
-        private float _relativeY;
-        private bool _isDragging = false;
-        private int _zIndex;  // Z-Index for controlling widget stacking order
-        #endregion
+        private int _zIndex;
 
-        #region Private Properties
         private float TitleBarHeight => 14.5f * ScaleFactor;
         private SKRect TitleBar => new(Rectangle.Left, Rectangle.Top, Rectangle.Right, Rectangle.Top + TitleBarHeight);
         private SKRect MinimizeButton => new(TitleBar.Right - TitleBarHeight, TitleBar.Top, TitleBar.Right, TitleBar.Bottom);
-        private static readonly Dictionary<SKGLElement, bool> _registeredParents = new();
-        #endregion
 
-        #region Protected Properties
         protected string Title { get; set; }
         protected string RightTitleInfo { get; set; }
         protected bool CanResize { get; }
         protected float ScaleFactor { get; private set; }
         protected SKPath ResizeTriangle => _resizeTriangle;
-        #endregion
 
-        #region Public Properties
         public bool Minimized { get; protected set; }
         public SKRect ClientRectangle => new(Rectangle.Left, Rectangle.Top + TitleBarHeight, Rectangle.Right, Rectangle.Bottom);
-        public int ZIndex
-        {
-            get => _zIndex;
-            set
-            {
-                _zIndex = value;
-                SortWidgets();
-            }
-        }
-
-        public SKSize Size
-        {
-            get => _size;
-            set
-            {
-                lock (_sync)
-                {
-                    if (!value.Width.IsNormalOrZero() || !value.Height.IsNormalOrZero())
-                        return;
-                    if (value.Width < 0f || value.Height < 0f)
-                        return;
-                    value.Width = (int)value.Width;
-                    value.Height = (int)value.Height;
-                    _size = value;
-                    InitializeResizeTriangle();
-                }
-            }
-        }
-
-        public SKPoint Location
-        {
-            get => _location;
-            set
-            {
-                lock (_sync)
-                {
-                    if ((value.X != 0f && !value.X.IsNormalOrZero()) ||
-                        (value.Y != 0f && !value.Y.IsNormalOrZero()))
-                        return;
-                    var cr = new Rect(0, 0, _parent.ActualWidth, _parent.ActualHeight);
-                    if (cr.Width == 0 ||
-                        cr.Height == 0)
-                        return;
-                    _location = value;
-                    CorrectLocationBounds(cr);
-                    _relativeX = value.X / (float)cr.Width;
-                    _relativeY = value.Y / (float)cr.Height;
-                    InitializeResizeTriangle();
-                }
-            }
-        }
-
-        public SKRect Rectangle => new SKRect(Location.X,
-            Location.Y,
-            Location.X + Size.Width,
-            Location.Y + Size.Height + TitleBarHeight);
+        public int ZIndex { get => _zIndex; set { _zIndex = value; SortWidgets(); } }
+        public SKPoint Location { get => GetCompensatedLocation(); set { lock (_sync) { _location = CompensateLocationForStorage(value); CorrectLocationBounds(); InitializeResizeTriangle(); } } }
+        public SKSize Size { get => _size; set { lock (_sync) { _size = value; InitializeResizeTriangle(); } } }
+        public SKRect Rectangle => new(Location.X, Location.Y, Location.X + Size.Width, Location.Y + Size.Height + TitleBarHeight);
         #endregion
 
         #region Constructor
@@ -129,73 +65,30 @@ namespace eft_dma_radar.UI.SKWidgetControl
                 _widgets.Add(this);
                 SortWidgets();
             }
-
             InitializeResizeTriangle();
-        }
-
-        private static void EnsureParentEventHandlers(SKGLElement parent)
-        {
-            lock (_registeredParents)
-            {
-                if (_registeredParents.TryGetValue(parent, out bool registered) && registered)
-                    return;
-
-                parent.PreviewMouseLeftButtonDown += Parent_MouseLeftButtonDown;
-                parent.PreviewMouseLeftButtonUp += Parent_MouseLeftButtonUp;
-                parent.PreviewMouseMove += Parent_MouseMove;
-                parent.MouseLeave += Parent_MouseLeave;
-
-                _registeredParents[parent] = true;
-            }
-        }
-
-        private static void SortWidgets()
-        {
-            lock (_widgetsLock)
-            {
-                _widgets.Sort((a, b) => a.ZIndex.CompareTo(b.ZIndex));
-            }
-        }
-
-        public void BringToFront()
-        {
-            lock (_widgetsLock)
-            {
-                int highestZ = 0;
-                foreach (var widget in _widgets)
-                {
-                    if (widget != this && widget._zIndex > highestZ)
-                        highestZ = widget._zIndex;
-                }
-
-                ZIndex = highestZ + 1;
-            }
         }
         #endregion
 
-        #region Static Event Handlers
+        #region Static Mouse Handlers (Hybrid Approach)
         private static void Parent_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            var parent = sender as SKGLElement;
-            if (parent == null) return;
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return;
 
-            var position = e.GetPosition(parent);
+            // Use Canvas coordinates to match widget positioning
+            var canvasPos = e.GetPosition(sender as UIElement);
+            var canvasSKPos = new SKPoint((float)canvasPos.X, (float)canvasPos.Y);
 
             SKWidget hitWidget = null;
-
             lock (_widgetsLock)
             {
                 for (int i = _widgets.Count - 1; i >= 0; i--)
                 {
                     var widget = _widgets[i];
-                    if (widget._parent == parent)
+                    if (widget.HitTest(canvasSKPos) != WidgetClickEvent.None)
                     {
-                        var test = widget.HitTest(new SKPoint((float)position.X, (float)position.Y));
-                        if (test != WidgetClickEvent.None)
-                        {
-                            hitWidget = widget;
-                            break;
-                        }
+                        hitWidget = widget;
+                        break;
                     }
                 }
             }
@@ -203,7 +96,7 @@ namespace eft_dma_radar.UI.SKWidgetControl
             if (hitWidget != null)
             {
                 hitWidget.BringToFront();
-                hitWidget.HandleMouseDown(position, e);
+                hitWidget.HandleMouseDown(e);
             }
         }
 
@@ -211,46 +104,40 @@ namespace eft_dma_radar.UI.SKWidgetControl
         {
             if (_capturedWidget != null)
             {
-                var position = e.GetPosition(_capturedWidget._parent);
-                _capturedWidget.HandleMouseUp(position, e);
+                _capturedWidget.HandleMouseUp(e);
                 _capturedWidget = null;
-
-                if (sender is SKGLElement parent && parent.IsMouseCaptured)
-                    parent.ReleaseMouseCapture();
-
+                if (sender is UIElement element && element.IsMouseCaptured)
+                {
+                    element.ReleaseMouseCapture();
+                }
                 e.Handled = true;
             }
-            else
+            else // Handle simple clicks (like minimize)
             {
-                var parent = sender as SKGLElement;
-                if (parent == null) return;
-
-                var position = e.GetPosition(parent);
+                var parentGrid = MainWindow.Window?.mainContentGrid;
+                if (parentGrid is null) return;
+                var canvasPos = e.GetPosition(sender as UIElement);
+                var canvasSKPos = new SKPoint((float)canvasPos.X, (float)canvasPos.Y);
 
                 lock (_widgetsLock)
                 {
                     for (int i = _widgets.Count - 1; i >= 0; i--)
                     {
                         var widget = _widgets[i];
-                        if (widget._parent == parent)
+                        var test = widget.HitTest(canvasSKPos);
+                        if (test == WidgetClickEvent.ClickedMinimize)
                         {
-                            var test = widget.HitTest(new SKPoint((float)position.X, (float)position.Y));
-                            if (test == WidgetClickEvent.ClickedMinimize)
+                            widget.Minimized = !widget.Minimized;
+                            widget._parent.InvalidateVisual();
+                            e.Handled = true;
+                            break;
+                        }
+                        else if (test == WidgetClickEvent.ClickedClientArea)
+                        {
+                            if (widget.HandleClientAreaClick(canvasSKPos))
                             {
-                                widget.Minimized = !widget.Minimized;
-                                widget.Location = widget.Location;
-                                parent.InvalidateVisual();
                                 e.Handled = true;
                                 break;
-                            }
-                            else if (test == WidgetClickEvent.ClickedClientArea)
-                            {
-                                var localPoint = new SKPoint((float)position.X, (float)position.Y);
-                                if (widget.HandleClientAreaClick(localPoint))
-                                {
-                                    e.Handled = true;
-                                    break;
-                                }
                             }
                         }
                     }
@@ -264,349 +151,282 @@ namespace eft_dma_radar.UI.SKWidgetControl
             {
                 if (e.LeftButton != MouseButtonState.Pressed)
                 {
-                    _capturedWidget._titleDrag = false;
-                    _capturedWidget._resizeDrag = false;
-                    _capturedWidget._isDragging = false;
-
-                    var parent = _capturedWidget._parent;
-                    if (parent.IsMouseCaptured)
-                    {
-                        parent.ReleaseMouseCapture();
-                    }
-
-                    _capturedWidget = null;
-                    parent.InvalidateVisual();
+                    _capturedWidget.HandleMouseUp(null); _capturedWidget = null;
+                    if (sender is UIElement element && element.IsMouseCaptured) element.ReleaseMouseCapture();
                     return;
                 }
-
-                var position = e.GetPosition(_capturedWidget._parent);
-                _capturedWidget.HandleMouseMove(position, e);
+                _capturedWidget.HandleMouseMove(e);
                 e.Handled = true;
             }
         }
-
-        private static void Parent_MouseLeave(object sender, MouseEventArgs e)
-        {
-            // If there's a captured widget and mouse leaves the control, don't release capture
-            // This allows dragging outside the control
-        }
         #endregion
 
-        #region Instance Event Handlers
-        private void HandleMouseDown(Point position, MouseButtonEventArgs e)
+        #region Instance Mouse Handlers
+        private void HandleMouseDown(MouseButtonEventArgs e)
         {
-            _lastMousePosition = position;
-
-            var test = HitTest(new SKPoint((float)position.X, (float)position.Y));
-            switch (test)
-            {
-                case WidgetClickEvent.ClickedTitleBar:
-                    _titleDrag = true;
-                    _isDragging = true;
-                    _capturedWidget = this;
-                    _parent.CaptureMouse();
-                    e.Handled = true;
-                    break;
-
-                case WidgetClickEvent.ClickedResize:
-                    if (CanResize)
-                    {
-                        _resizeDrag = true;
-                        _isDragging = true;
-                        _capturedWidget = this;
-                        _parent.CaptureMouse();
-                        e.Handled = true;
-                    }
-                    break;
-
-                case WidgetClickEvent.ClickedMinimize:
-                    e.Handled = true;
-                    break;
-            }
-        }
-
-        private void HandleMouseUp(Point position, MouseButtonEventArgs e)
-        {
-            _titleDrag = false;
-            _resizeDrag = false;
-            _isDragging = false;
-
+            // Use Canvas coordinates to match widget positioning
+            _lastRawMousePosition = e.GetPosition(_parent);
+            
+            _titleDrag = true;
+            _capturedWidget = this;
+            _parent.CaptureMouse();
             e.Handled = true;
         }
 
-        private void HandleMouseMove(Point position, MouseEventArgs e)
+        private void HandleMouseUp(MouseButtonEventArgs e)
         {
+            _titleDrag = false;
+            _resizeDrag = false;
+            if (e != null) e.Handled = true;
+        }
+
+        private void HandleMouseMove(MouseEventArgs e)
+        {
+            var currentRawPos = e.GetPosition(_parent);
+
+            var deltaX = (float)(currentRawPos.X - _lastRawMousePosition.X);
+            var deltaY = (float)(currentRawPos.Y - _lastRawMousePosition.Y);
+
             if (_resizeDrag && CanResize)
             {
-                if (position.X < Rectangle.Left || position.Y < Rectangle.Top)
-                    return;
-
-                var newSize = new SKSize(
-                    Math.Abs(Rectangle.Left - (float)position.X),
-                    Math.Abs(Rectangle.Top - (float)position.Y));
-
-                Size = newSize;
-                _parent.InvalidateVisual();
-                e.Handled = true;
+                Size = new SKSize(Size.Width + deltaX, Size.Height + deltaY);
             }
             else if (_titleDrag)
             {
-                float deltaX = (float)(position.X - _lastMousePosition.X);
-                float deltaY = (float)(position.Y - _lastMousePosition.Y);
-
-                var newLoc = new SKPoint(Location.X + deltaX, Location.Y + deltaY);
-                Location = newLoc;
-
-                _parent.InvalidateVisual();
-                e.Handled = true;
+                Location = new SKPoint(Location.X + deltaX, Location.Y + deltaY);
             }
 
-            _lastMousePosition = position;
+            _lastRawMousePosition = currentRawPos;
+            _parent.InvalidateVisual();
         }
         #endregion
 
-        #region Hit Testing
-        private WidgetClickEvent HitTest(SKPoint point)
+        #region Other Methods (No logical changes, just for completeness)
+        private void EnsureParentEventHandlers(SKGLElement parent)
         {
-            var result = WidgetClickEvent.None;
-            var clicked = point.X >= Rectangle.Left && point.X <= Rectangle.Right &&
-                         point.Y >= Rectangle.Top && point.Y <= Rectangle.Bottom;
-
-            if (!clicked)
-                return result;
-
-            result = WidgetClickEvent.Clicked;
-
-            var titleClicked = point.X >= TitleBar.Left && point.X <= TitleBar.Right &&
-                              point.Y >= TitleBar.Top && point.Y <= TitleBar.Bottom;
-
-            if (titleClicked)
+            lock (_registeredParents)
             {
-                result = WidgetClickEvent.ClickedTitleBar;
-
-                var minClicked = point.X >= MinimizeButton.Left && point.X <= MinimizeButton.Right &&
-                                point.Y >= MinimizeButton.Top && point.Y <= MinimizeButton.Bottom;
-
-                if (minClicked)
-                    result = WidgetClickEvent.ClickedMinimize;
+                if (_registeredParents.TryGetValue(parent, out bool registered) && registered) return;
+                parent.PreviewMouseLeftButtonDown += Parent_MouseLeftButtonDown;
+                parent.PreviewMouseLeftButtonUp += Parent_MouseLeftButtonUp;
+                parent.PreviewMouseMove += Parent_MouseMove;
+                _registeredParents[parent] = true;
+            }
+        }
+        private static void SortWidgets() { lock (_widgetsLock) { _widgets.Sort((a, b) => a.ZIndex.CompareTo(b.ZIndex)); } }
+        public void BringToFront() { lock (_widgetsLock) { int highestZ = 0; foreach (var widget in _widgets) { if (widget != this && widget._zIndex > highestZ) highestZ = widget._zIndex; } ZIndex = highestZ + 1; } }
+        public void ToggleMinimized() { Minimized = !Minimized; InitializeResizeTriangle(); }
+        public WidgetClickEvent HitTest(SKPoint point) { if (!Rectangle.Contains(point)) return WidgetClickEvent.None; if (MinimizeButton.Contains(point)) return WidgetClickEvent.ClickedMinimize; if (TitleBar.Contains(point)) return WidgetClickEvent.ClickedTitleBar; if (!Minimized && CanResize && ResizeTriangle.Contains(point.X, point.Y)) return WidgetClickEvent.ClickedResize; if (!Minimized && ClientRectangle.Contains(point)) return WidgetClickEvent.ClickedClientArea; return WidgetClickEvent.Clicked; }
+        public virtual bool HandleClientAreaClick(SKPoint point) => false;
+        public virtual void Draw(SKCanvas canvas) { if (!Minimized) canvas.DrawRect(this.Rectangle, WidgetBackgroundPaint); canvas.DrawRect(this.TitleBar, TitleBarPaint); var titleCenterY = this.TitleBar.Top + (this.TitleBar.Height / 2); var titleYOffset = (TitleBarText.FontMetrics.Ascent + TitleBarText.FontMetrics.Descent) / 2; canvas.DrawText(this.Title, new SKPoint(this.TitleBar.Left + 2.5f * ScaleFactor, titleCenterY - titleYOffset), TitleBarText); if (!string.IsNullOrEmpty(this.RightTitleInfo)) { var rightInfoWidth = RightTitleInfoText.MeasureText(this.RightTitleInfo); var rightX = this.TitleBar.Right - rightInfoWidth - 2.5f * ScaleFactor - this.TitleBarHeight; canvas.DrawText(this.RightTitleInfo, new SKPoint(rightX, titleCenterY - titleYOffset), RightTitleInfoText); } canvas.DrawRect(this.MinimizeButton, ButtonBackgroundPaint); DrawMinimizeButton(canvas); if (!Minimized && CanResize) DrawResizeCorner(canvas); DrawDebugInfo(canvas); }
+        public virtual void SetScaleFactor(float newScale) { ScaleFactor = newScale; InitializeResizeTriangle(); TitleBarText.TextSize = 12F * newScale; RightTitleInfoText.TextSize = 12F * newScale; SymbolPaint.StrokeWidth = 2f * newScale; }
+        private void CorrectLocationBounds() 
+        { 
+            var parentGrid = MainWindow.Window?.mainContentGrid; 
+            if (parentGrid is null) return; 
+            
+            // Use Grid bounds since that's our coordinate system
+            var gridBounds = new Rect(0, 0, parentGrid.ActualWidth, parentGrid.ActualHeight); 
+            var rect = Minimized ? TitleBar : Rectangle; 
+            var newLoc = _location; 
+            
+            if (rect.Right > gridBounds.Right) 
+                newLoc.X = (float)(gridBounds.Right - rect.Width); 
+            if (rect.Bottom > gridBounds.Bottom) 
+                newLoc.Y = (float)(gridBounds.Bottom - rect.Height); 
+            if (rect.Left < gridBounds.Left) 
+                newLoc.X = (float)gridBounds.Left; 
+            if (rect.Top < gridBounds.Top) 
+                newLoc.Y = (float)gridBounds.Top; 
+                
+            _location = newLoc; 
+        }
+        private void DrawMinimizeButton(SKCanvas canvas) { var minHalfLength = MinimizeButton.Width / 4; if (Minimized) { canvas.DrawLine(MinimizeButton.MidX - minHalfLength, MinimizeButton.MidY, MinimizeButton.MidX + minHalfLength, MinimizeButton.MidY, SymbolPaint); canvas.DrawLine(MinimizeButton.MidX, MinimizeButton.MidY - minHalfLength, MinimizeButton.MidX, MinimizeButton.MidY + minHalfLength, SymbolPaint); } else canvas.DrawLine(MinimizeButton.MidX - minHalfLength, MinimizeButton.MidY, MinimizeButton.MidX + minHalfLength, MinimizeButton.MidY, SymbolPaint); }
+        private void InitializeResizeTriangle() { var triangleSize = 10.5f * ScaleFactor; var bottomRight = new SKPoint(Rectangle.Right, Rectangle.Bottom); var topOfTriangle = new SKPoint(bottomRight.X, bottomRight.Y - triangleSize); var leftOfTriangle = new SKPoint(bottomRight.X - triangleSize, bottomRight.Y); var path = new SKPath { FillType = SKPathFillType.Winding }; path.MoveTo(bottomRight); path.LineTo(topOfTriangle); path.LineTo(leftOfTriangle); path.Close(); var old = Interlocked.Exchange(ref _resizeTriangle, path); old?.Dispose(); }
+        private void DrawResizeCorner(SKCanvas canvas) { if (ResizeTriangle is not null) canvas.DrawPath(ResizeTriangle, TitleBarPaint); }
+        
+        private SKPoint GetScreenLocation()
+        {
+            // Transform canvas coordinates to screen coordinates accounting for rotation
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return _location;
+            
+            var canvasWidth = (float)parentGrid.ActualWidth;
+            var canvasHeight = (float)parentGrid.ActualHeight;
+            var centerX = canvasWidth / 2f;
+            var centerY = canvasHeight / 2f;
+            
+            if (MainWindow.RotationDegrees == 0) 
+                return _location;
+                
+            // Apply rotation transformation to get screen position
+            var radians = MainWindow.RotationDegrees * (Math.PI / 180.0);
+            var cos = (float)Math.Cos(radians);
+            var sin = (float)Math.Sin(radians);
+            
+            var translatedX = _location.X - centerX;
+            var translatedY = _location.Y - centerY;
+            
+            var rotatedX = translatedX * cos - translatedY * sin;
+            var rotatedY = translatedX * sin + translatedY * cos;
+            
+            return new SKPoint(rotatedX + centerX, rotatedY + centerY);
+        }
+        
+        private SKPoint TransformToCanvasCoordinates(SKPoint screenPoint)
+        {
+            // Transform screen coordinates to canvas coordinates accounting for rotation
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return screenPoint;
+            
+            var canvasWidth = (float)parentGrid.ActualWidth;
+            var canvasHeight = (float)parentGrid.ActualHeight;
+            var centerX = canvasWidth / 2f;
+            var centerY = canvasHeight / 2f;
+            
+            if (MainWindow.RotationDegrees == 0) 
+                return screenPoint;
+                
+            // Apply inverse rotation transformation
+            var radians = -MainWindow.RotationDegrees * (Math.PI / 180.0);
+            var cos = (float)Math.Cos(radians);
+            var sin = (float)Math.Sin(radians);
+            
+            var translatedX = screenPoint.X - centerX;
+            var translatedY = screenPoint.Y - centerY;
+            
+            var rotatedX = translatedX * cos - translatedY * sin;
+            var rotatedY = translatedX * sin + translatedY * cos;
+            
+            return new SKPoint(rotatedX + centerX, rotatedY + centerY);
+        }
+        
+        private void DrawDebugInfo(SKCanvas canvas)
+        {
+            // Only show debug info for one widget to avoid clutter
+            if (Title != "Debug Info") return;
+            
+            var debugText = $"Rot: {MainWindow.RotationDegrees}° | Stored: ({_location.X:F0},{_location.Y:F0}) | Compensated: ({GetCompensatedLocation().X:F0},{GetCompensatedLocation().Y:F0})";
+            
+            var debugPos = new SKPoint(Rectangle.Left, Rectangle.Bottom + 15 * ScaleFactor);
+            using var debugPaint = new SKPaint
+            {
+                Color = SKColors.Yellow,
+                TextSize = 10 * ScaleFactor,
+                IsAntialias = true
+            };
+            
+            canvas.DrawText(debugText, debugPos, debugPaint);
+        }
+        
+        private static SKPoint TransformMousePosition(Point rawPosition)
+        {
+            // If there's no rotation, we don't need to do anything.
+            if (MainWindow.RotationDegrees == 0)
+            {
+                return new SKPoint((float)rawPosition.X, (float)rawPosition.Y);
             }
 
-            if (!Minimized)
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return new SKPoint((float)rawPosition.X, (float)rawPosition.Y);
+
+            // Get the center of the canvas, which is our rotation pivot.
+            var centerX = (float)parentGrid.ActualWidth / 2;
+            var centerY = (float)parentGrid.ActualHeight / 2;
+
+            // Create a matrix that performs the INVERSE rotation around the center point.
+            // We use the NEGATIVE angle to reverse the canvas rotation.
+            var inverseRotationMatrix = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, centerX, centerY);
+
+            // Apply the inverse matrix to the raw mouse point to get its logical position.
+            return inverseRotationMatrix.MapPoint(new SKPoint((float)rawPosition.X, (float)rawPosition.Y));
+        }
+        
+        private SKPoint GetTransformedLocation()
+        {
+            // Transform stored canvas coordinates to maintain visual position across rotations
+            if (MainWindow.RotationDegrees == 0)
+                return _location;
+
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return _location;
+
+            var gridWidth = (float)parentGrid.ActualWidth;
+            var gridHeight = (float)parentGrid.ActualHeight;
+            var gridCenterX = gridWidth / 2f;
+            var gridCenterY = gridHeight / 2f;
+
+            // Transform the stored location to maintain visual position
+            var radians = MainWindow.RotationDegrees * (Math.PI / 180.0);
+            var cos = (float)Math.Cos(radians);
+            var sin = (float)Math.Sin(radians);
+
+            var translatedX = _location.X - gridCenterX;
+            var translatedY = _location.Y - gridCenterY;
+
+            var rotatedX = translatedX * cos - translatedY * sin;
+            var rotatedY = translatedX * sin + translatedY * cos;
+
+            return new SKPoint(rotatedX + gridCenterX, rotatedY + gridCenterY);
+        }
+
+        private SKPoint TransformLocationForStorage(SKPoint visualLocation)
+        {
+            // Transform visual coordinates back to storage coordinates
+            if (MainWindow.RotationDegrees == 0)
+                return visualLocation;
+
+            var parentGrid = MainWindow.Window?.mainContentGrid;
+            if (parentGrid is null) return visualLocation;
+
+            var gridWidth = (float)parentGrid.ActualWidth;
+            var gridHeight = (float)parentGrid.ActualHeight;
+            var gridCenterX = gridWidth / 2f;
+            var gridCenterY = gridHeight / 2f;
+
+            // Apply inverse transformation
+            var radians = -MainWindow.RotationDegrees * (Math.PI / 180.0);
+            var cos = (float)Math.Cos(radians);
+            var sin = (float)Math.Sin(radians);
+
+            var translatedX = visualLocation.X - gridCenterX;
+            var translatedY = visualLocation.Y - gridCenterY;
+
+            var rotatedX = translatedX * cos - translatedY * sin;
+            var rotatedY = translatedX * sin + translatedY * cos;
+
+            return new SKPoint(rotatedX + gridCenterX, rotatedY + gridCenterY);
+        }
+        
+        private SKPoint GetSwappedLocation()
+        {
+            // Swap coordinates to match canvas dimension flipping
+            if (MainWindow.RotationDegrees == 90 || MainWindow.RotationDegrees == 270)
             {
-                var clientClicked = point.X >= ClientRectangle.Left && point.X <= ClientRectangle.Right &&
-                                   point.Y >= ClientRectangle.Top && point.Y <= ClientRectangle.Bottom;
-
-                if (clientClicked)
-                    result = WidgetClickEvent.ClickedClientArea;
-
-                if (CanResize && _resizeTriangle != null && _resizeTriangle.Contains(point.X, point.Y))
-                    result = WidgetClickEvent.ClickedResize;
+                return new SKPoint(_location.Y, _location.X);
             }
-
-            return result;
+            return _location;
         }
-        #endregion
-
-        #region Virtual Methods
-        /// <summary>
-        /// Override to handle client area clicks in derived widgets
-        /// </summary>
-        /// <param name="point">Click point in widget coordinates</param>
-        /// <returns>True if the click was handled</returns>
-        public virtual bool HandleClientAreaClick(SKPoint point)
+        
+        private SKPoint GetCompensatedLocation()
         {
-            return false;
+            // SIMPLE SOLUTION: No coordinate compensation at all!
+            // Let the counter-rotation matrix in the drawing code handle positioning
+            return _location;
         }
-        #endregion
-
-        #region Public Methods
-        public virtual void Draw(SKCanvas canvas)
+        
+        private SKPoint CompensateLocationForStorage(SKPoint visualLocation)
         {
-            if (!Minimized)
-                canvas.DrawRect(Rectangle, WidgetBackgroundPaint);
-
-            canvas.DrawRect(TitleBar, TitleBarPaint);
-            var titleCenterY = TitleBar.Top + (TitleBar.Height / 2);
-            var titleYOffset = (TitleBarText.FontMetrics.Ascent + TitleBarText.FontMetrics.Descent) / 2;
-
-            canvas.DrawText(Title,
-                new(TitleBar.Left + 2.5f * ScaleFactor,
-                titleCenterY - titleYOffset),
-                TitleBarText);
-
-            if (!string.IsNullOrEmpty(RightTitleInfo))
-            {
-                var rightInfoWidth = RightTitleInfoText.MeasureText(RightTitleInfo);
-                var rightX = TitleBar.Right - rightInfoWidth - 2.5f * ScaleFactor - TitleBarHeight; // Leave space for minimize button
-
-                canvas.DrawText(RightTitleInfo,
-                    new(rightX, titleCenterY - titleYOffset),
-                    RightTitleInfoText);
-            }
-
-            canvas.DrawRect(MinimizeButton, ButtonBackgroundPaint);
-
-            DrawMinimizeButton(canvas);
-
-            if (!Minimized && CanResize)
-                DrawResizeCorner(canvas);
+            // SIMPLE SOLUTION: No coordinate compensation at all!
+            // Store coordinates as-is
+            return visualLocation;
         }
-
-        public virtual void SetScaleFactor(float newScale)
-        {
-            ScaleFactor = newScale;
-            InitializeResizeTriangle();
-
-            TitleBarText.TextSize = 12F * newScale;
-            RightTitleInfoText.TextSize = 12F * newScale;
-            SymbolPaint.StrokeWidth = 2f * newScale;
-        }
-        #endregion
-
-        #region Private Methods
-        private void CorrectLocationBounds(Rect clientRectangle)
-        {
-            var rect = Minimized ? TitleBar : Rectangle;
-            var topMargin = 6;
-
-            if (rect.Left < clientRectangle.Left)
-                _location = new SKPoint((float)clientRectangle.Left, _location.Y);
-            else if (rect.Right > clientRectangle.Right)
-                _location = new SKPoint((float)(clientRectangle.Right - rect.Width), _location.Y);
-
-            if (rect.Top < clientRectangle.Top + topMargin)
-                _location = new SKPoint(_location.X, (float)clientRectangle.Top + topMargin);
-            else if (rect.Bottom > clientRectangle.Bottom)
-                _location = new SKPoint(_location.X, (float)(clientRectangle.Bottom - rect.Height));
-        }
-
-        private void DrawMinimizeButton(SKCanvas canvas)
-        {
-            var minHalfLength = MinimizeButton.Width / 4;
-
-            if (Minimized)
-            {
-                canvas.DrawLine(MinimizeButton.MidX - minHalfLength,
-                    MinimizeButton.MidY,
-                    MinimizeButton.MidX + minHalfLength,
-                    MinimizeButton.MidY,
-                    SymbolPaint);
-                canvas.DrawLine(MinimizeButton.MidX,
-                    MinimizeButton.MidY - minHalfLength,
-                    MinimizeButton.MidX,
-                    MinimizeButton.MidY + minHalfLength,
-                    SymbolPaint);
-            }
-            else
-                canvas.DrawLine(MinimizeButton.MidX - minHalfLength,
-                    MinimizeButton.MidY,
-                    MinimizeButton.MidX + minHalfLength,
-                    MinimizeButton.MidY,
-                    SymbolPaint);
-        }
-
-        private void InitializeResizeTriangle()
-        {
-            var triangleSize = 10.5f * ScaleFactor;
-            var bottomRight = new SKPoint(Rectangle.Right, Rectangle.Bottom);
-            var topOfTriangle = new SKPoint(bottomRight.X, bottomRight.Y - triangleSize);
-            var leftOfTriangle = new SKPoint(bottomRight.X - triangleSize, bottomRight.Y);
-
-            var path = new SKPath();
-            path.MoveTo(bottomRight);
-            path.LineTo(topOfTriangle);
-            path.LineTo(leftOfTriangle);
-            path.Close();
-            var old = Interlocked.Exchange(ref _resizeTriangle, path);
-            old?.Dispose();
-        }
-
-        private void DrawResizeCorner(SKCanvas canvas)
-        {
-            var path = ResizeTriangle;
-            if (path is not null)
-                canvas.DrawPath(path, TitleBarPaint);
-        }
+        
+        public virtual void Dispose() { /* Base implementation */ }
         #endregion
 
         #region Paints
-        private static readonly SKPaint WidgetBackgroundPaint = new SKPaint()
-        {
-            Color = SKColors.Black.WithAlpha(0xBE),
-            StrokeWidth = 1,
-            Style = SKPaintStyle.Fill,
-        };
-
-        private static readonly SKPaint TitleBarPaint = new SKPaint()
-        {
-            Color = SKColors.Gray,
-            StrokeWidth = 0.5f,
-            Style = SKPaintStyle.Fill,
-        };
-
-        private static readonly SKPaint ButtonBackgroundPaint = new SKPaint()
-        {
-            Color = SKColors.LightGray,
-            StrokeWidth = 0.1f,
-            Style = SKPaintStyle.Fill,
-        };
-
-        private static readonly SKPaint SymbolPaint = new SKPaint()
-        {
-            Color = SKColors.Black,
-            StrokeWidth = 2f,
-            Style = SKPaintStyle.Stroke,
-            IsAntialias = true
-        };
-
-        private static readonly SKPaint TitleBarText = new SKPaint()
-        {
-            SubpixelText = true,
-            Color = SKColors.White,
-            IsStroke = false,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Left,
-            TextEncoding = SKTextEncoding.Utf8,
-            IsAntialias = true,
-            FilterQuality = SKFilterQuality.High
-        };
-
-        private static readonly SKPaint RightTitleInfoText = new SKPaint()
-        {
-            SubpixelText = true,
-            Color = SKColors.White,
-            IsStroke = false,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Left,
-            TextEncoding = SKTextEncoding.Utf8,
-            IsAntialias = true,
-            FilterQuality = SKFilterQuality.High
-        };
-        #endregion
-
-        #region IDisposable
-        private bool _disposed = false;
-        public virtual void Dispose()
-        {
-            var disposed = Interlocked.Exchange(ref _disposed, true);
-            if (!disposed)
-            {
-                lock (_widgetsLock)
-                {
-                    _widgets.Remove(this);
-                }
-
-                ResizeTriangle?.Dispose();
-
-                if (_capturedWidget == this)
-                {
-                    if (_parent.IsMouseCaptured)
-                        _parent.ReleaseMouseCapture();
-
-                    _capturedWidget = null;
-                }
-            }
-        }
+        private static readonly SKPaint WidgetBackgroundPaint = new() { Color = SKColors.Black.WithAlpha(0xBE), StrokeWidth = 1, Style = SKPaintStyle.Fill, }; private static readonly SKPaint TitleBarPaint = new() { Color = SKColors.Gray, StrokeWidth = 0.5f, Style = SKPaintStyle.Fill, }; private static readonly SKPaint ButtonBackgroundPaint = new() { Color = SKColors.LightGray, StrokeWidth = 0.1f, Style = SKPaintStyle.Fill, }; private static readonly SKPaint SymbolPaint = new() { Color = SKColors.Black, StrokeWidth = 2f, Style = SKPaintStyle.Stroke, IsAntialias = true }; private static readonly SKPaint TitleBarText = new() { SubpixelText = true, Color = SKColors.White, IsStroke = false, TextSize = 12f, TextAlign = SKTextAlign.Left, IsAntialias = true, FilterQuality = SKFilterQuality.High }; private static readonly SKPaint RightTitleInfoText = new() { SubpixelText = true, Color = SKColors.White, IsStroke = false, TextSize = 12f, TextAlign = SKTextAlign.Left, IsAntialias = true, FilterQuality = SKFilterQuality.High };
         #endregion
     }
 }

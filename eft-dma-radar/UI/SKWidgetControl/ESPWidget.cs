@@ -234,150 +234,144 @@ namespace eft_dma_radar.UI.SKWidgetControl
         {
             base.SetScaleFactor(newScale);
 
-            lock (PaintESPWidgetCrosshair)
-            {
-                PaintESPWidgetCrosshair.StrokeWidth = 1 * newScale;
-                PaintESPWidgetLocalPlayer.StrokeWidth = 1 * newScale;
-                PaintESPWidgetUSEC.StrokeWidth = 1 * newScale;
-                PaintESPWidgetBEAR.StrokeWidth = 1 * newScale;
-                PaintESPWidgetSpecial.StrokeWidth = 1 * newScale;
-                PaintESPWidgetStreamer.StrokeWidth = 1 * newScale;
-                PaintESPWidgetTeammate.StrokeWidth = 1 * newScale;
-                PaintESPWidgetBoss.StrokeWidth = 1 * newScale;
-                PaintESPWidgetAimbotLocked.StrokeWidth = 1 * newScale;
-                PaintESPWidgetScav.StrokeWidth = 1 * newScale;
-                PaintESPWidgetRaider.StrokeWidth = 1 * newScale;
-                PaintESPWidgetPScav.StrokeWidth = 1 * newScale;
-                PaintESPWidgetFocused.StrokeWidth = 1 * newScale;
-                PaintESPWidgetLoot.StrokeWidth = 0.75f * newScale;
-                TextESPWidgetLoot.TextSize = 9f * newScale;
-            }
+            var newLocation = new SKPoint(Location.X, Location.Y);
+            var newSize = new SKSize(Size.Width, Size.Height);
+
+            _espCanvas?.Dispose();
+            _espCanvas = null;
+            _espBitmap?.Dispose();
+            _espBitmap = null;
+
+            _espBitmap = new SKBitmap((int)newSize.Width, (int)newSize.Height, SKImageInfo.PlatformColorType, SKAlphaType.Premul);
+            _espCanvas = new SKCanvas(_espBitmap);
         }
 
         public override void Dispose()
         {
-            _espBitmap?.Dispose();
             _espCanvas?.Dispose();
-            _espBitmap = null;
-            _espCanvas = null;
+            _espBitmap?.Dispose();
             base.Dispose();
         }
 
-        #region Mini ESP Paints
+        #region Paint Objects
         private static SKPaint PaintESPWidgetCrosshair { get; } = new()
         {
-            Color = SKColors.White,
-            StrokeWidth = 1,
+            Color = SKColors.LimeGreen,
             Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1,
             IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetLocalPlayer { get; } = new()
         {
-            Color = SKColors.Green,
+            Color = SKColors.Red,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetUSEC { get; } = new()
         {
-            Color = SKColors.Red,
+            Color = SKColors.Blue,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetBEAR { get; } = new()
         {
-            Color = SKColors.Blue,
+            Color = SKColors.Red,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetAimbotLocked { get; } = new()
         {
-            Color = SKColors.Blue,
-            StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            Color = SKColors.Orange,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2,
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetSpecial { get; } = new()
         {
-            Color = SKColors.HotPink,
+            Color = SKColors.Purple,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetStreamer { get; } = new()
         {
-            Color = SKColors.MediumPurple,
+            Color = SKColors.Pink,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetTeammate { get; } = new()
         {
             Color = SKColors.LimeGreen,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetBoss { get; } = new()
         {
-            Color = SKColors.Fuchsia,
+            Color = SKColors.Yellow,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetScav { get; } = new()
         {
-            Color = SKColors.Yellow,
+            Color = SKColors.White,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetRaider { get; } = new()
         {
-            Color = SKColor.Parse("ffc70f"),
+            Color = SKColors.Orange,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetPScav { get; } = new()
         {
-            Color = SKColors.White,
+            Color = SKColors.Gray,
+            Style = SKPaintStyle.Stroke,
             StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetFocused { get; } = new()
         {
-            Color = SKColors.Coral,
-            StrokeWidth = 1,
-            Style = SKPaintStyle.Stroke
+            Color = SKColors.Cyan,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2,
+            IsAntialias = true
         };
 
         internal static SKPaint PaintESPWidgetLoot { get; } = new()
         {
-            Color = SKColors.WhiteSmoke,
-            StrokeWidth = 0.75f,
+            Color = SKColors.LimeGreen,
             Style = SKPaintStyle.Fill,
-            IsAntialias = true,
-            FilterQuality = SKFilterQuality.High
+            IsAntialias = true
         };
 
         internal static SKPaint TextESPWidgetLoot { get; } = new()
         {
-            SubpixelText = true,
-            Color = SKColors.WhiteSmoke,
-            IsStroke = false,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            TextEncoding = SKTextEncoding.Utf8,
+            Color = SKColors.White,
             IsAntialias = true,
-            Typeface = CustomFonts.SKFontFamilyRegular,
-            FilterQuality = SKFilterQuality.High
+            TextSize = 12,
+            Typeface = SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
         };
-
         #endregion
     }
 }

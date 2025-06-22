@@ -1279,10 +1279,17 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 
                 DrawPlayerMarker(canvas, localPlayer, point, typeSettings);
 
+                var height = Position.Y - localPlayer.Position.Y;
+
+                // Draw height indicators even in battlemode
+                if (typeSettings.ShowHeight && typeSettings.HeightIndicator)
+                {
+                    DrawAlternateHeightIndicator(canvas, point, height, GetPaints(null));
+                }
+
                 if (this == localPlayer || BattleMode)
                     return;
 
-                var height = Position.Y - localPlayer.Position.Y;
                 string nameText = null;
                 string distanceText = null;
                 string heightText = null;
@@ -1330,9 +1337,6 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                     rightSideInfo.Add(Alerts);
 
                 DrawPlayerText(canvas, point, nameText, distanceText, heightText, rightSideInfo, hasImportantItems);
-
-                if (typeSettings.ShowHeight && typeSettings.HeightIndicator)
-                    DrawAlternateHeightIndicator(canvas, point, height, GetPaints(null));
             }
             catch (Exception ex)
             {
@@ -1342,6 +1346,10 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
 
         private void DrawAlternateHeightIndicator(SKCanvas canvas, SKPoint point, float heightDiff, ValueTuple<SKPaint, SKPaint> paints)
         {
+            canvas.Save();
+            var matrix = canvas.TotalMatrix;
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, point.X, point.Y);
+            canvas.Concat(ref counterRotation);
             var baseX = point.X - (15.0f * MainWindow.UIScale);
             var baseY = point.Y + (3.5f * MainWindow.UIScale);
 
@@ -1364,6 +1372,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 canvas.DrawPath(path, SKPaints.ShapeOutline);
                 canvas.DrawPath(path, paints.Item1);
             }
+            canvas.Restore();
         }
 
         private void DrawPlayerText(SKCanvas canvas, SKPoint point,
@@ -1371,6 +1380,12 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                                       string heightText, List<string> rightSideInfo,
                                       bool hasImportantItems)
         {
+            //counter rotation text
+            canvas.Save();
+            var matrix = canvas.TotalMatrix;
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, point.X, point.Y);
+            canvas.Concat(ref counterRotation);
+
             var paints = GetPaints(null);
 
             if (MainWindow.MouseoverGroup is int grp && grp == GroupID)
@@ -1452,6 +1467,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                     rightPoint.Offset(0, textSize);
                 }
             }
+            canvas.Restore();
         }
 
         /// <summary>
@@ -1472,6 +1488,16 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
             canvas.DrawCircle(point, size, paints.Item1);
 
             var aimlineLength = typeSettings.AimlineLength;
+
+            // Check if this is the local player and aimline when scoped is enabled
+            if (this is LocalPlayer && typeSettings.AimlineWhenScoped)
+            {
+                // Check if the local player is currently scoped using CameraManagerBase
+                if (CameraManagerBase.IsScoped)
+                {
+                    aimlineLength = 9999; // Max aimline length when scoped
+                }
+            }
 
             if (!IsFriendly && this.IsFacingTarget(localPlayer, typeSettings.RenderDistance))
                 aimlineLength = 9999;
@@ -1549,6 +1575,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
 
         public void DrawMouseover(SKCanvas canvas, LoneMapParams mapParams, LocalPlayer localPlayer)
         {
+
             if (this == localPlayer)
                 return;
 

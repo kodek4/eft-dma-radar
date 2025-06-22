@@ -462,10 +462,13 @@ namespace eft_dma_radar.UI.Misc
         /// </summary>
         public static void DrawMouseoverText(this SKPoint zoomedMapPos, SKCanvas canvas, IEnumerable<string> lines)
         {
+            canvas.Save();
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, zoomedMapPos.X, zoomedMapPos.Y);
+            canvas.Concat(ref counterRotation);
             float maxLength = 0;
             foreach (var line in lines)
             {
-                var length = SKPaints.TextMouseover.MeasureText(line);
+                var length = SKPaints.TextBoss.MeasureText(line);
                 if (length > maxLength)
                     maxLength = length;
             }
@@ -485,6 +488,7 @@ namespace eft_dma_radar.UI.Misc
                 canvas.DrawText(line, zoomedMapPos, SKPaints.TextMouseover); // draw line text
                 zoomedMapPos.Offset(0, 12f * MainWindow.UIScale);
             }
+            canvas.Restore();
         }
 
         /// <summary>

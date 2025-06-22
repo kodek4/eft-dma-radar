@@ -252,12 +252,14 @@ namespace eft_dma_radar.UI.Misc
         [JsonInclude]
         [JsonPropertyName("widgets")]
         public WidgetsConfig Widgets { get; private set; } = new();
+
         /// <summary>
         /// Hotkeys Configuration.
         /// </summary>
         [JsonInclude]
         [JsonPropertyName("hotKeys")]
         public HotkeyConfig HotKeys { get; private set; } = new();
+
         /// <summary>
         /// Web Radar Configuration.
         /// </summary>
@@ -294,6 +296,26 @@ namespace eft_dma_radar.UI.Misc
         private static readonly FileInfo _tempFile = new(Path.Combine(Program.ConfigPath.FullName, Filename + ".tmp"));
 
         /// <summary>
+        /// Clean up any orphaned temp files
+        /// </summary>
+        private static void CleanupOrphanedFiles()
+        {
+            try
+            {
+                // Clean up temp file if it exists (shouldn't normally exist on startup)
+                if (_tempFile.Exists)
+                {
+                    _tempFile.Delete();
+                    LoneLogging.WriteLine("Cleaned up orphaned temp file");
+                }
+            }
+            catch
+            {
+                // Ignore cleanup errors
+            }
+        }
+
+        /// <summary>
         /// Load Config Instance.
         /// </summary>
         /// <returns>Config Instance.</returns>
@@ -303,34 +325,24 @@ namespace eft_dma_radar.UI.Misc
             {
                 try
                 {
+                    // Clean up any orphaned files first
+                    CleanupOrphanedFiles();
+
                     Config config = new Config();
+                    var backupFile = new FileInfo(Path.Combine(Program.ConfigPath.FullName, Filename + ".backup"));
 
                     if (_configFile.Exists)
                     {
                         string json = null;
+                        bool mainFileValid = false;
+
+                        // Try to read main config file
                         try
                         {
                             json = File.ReadAllText(_configFile.FullName);
-                        }
-                        catch
-                        {
-                            if (_tempFile.Exists)
+                            if (!string.IsNullOrEmpty(json))
                             {
-                                try
-                                {
-                                    json = File.ReadAllText(_tempFile.FullName);
-                                }
-                                catch
-                                {
-                                    json = null;
-                                }
-                            }
-                        }
-
-                        if (!string.IsNullOrEmpty(json))
-                        {
-                            try
-                            {
+                                // Validate the JSON by trying to deserialize it
                                 var options = new JsonSerializerOptions
                                 {
                                     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -340,27 +352,90 @@ namespace eft_dma_radar.UI.Misc
                                     PropertyNameCaseInsensitive = true
                                 };
 
-                                config = JsonSerializer.Deserialize<Config>(json, options);
-
-                                EnsureComplexObjectsInitialized(config);
-                            }
-                            catch (Exception ex)
-                            {
-                                LoneLogging.WriteLine($"Error deserializing config: {ex.Message}");
-
-                                config = new Config();
-
-                                if (!(ex is JsonException))
+                                var testConfig = JsonSerializer.Deserialize<Config>(json, options);
+                                if (testConfig != null)
                                 {
-                                    MessageBox.Show(
-                                        $"Config File Error: {ex.Message}\n\n" +
-                                        $"Default settings will be used.");
+                                    mainFileValid = true;
+                                    config = testConfig;
+                                    EnsureComplexObjectsInitialized(config);
                                 }
                             }
                         }
-
-                        if (config == null)
+                        catch
                         {
+                            // Main file is corrupted or unreadable
+                        }
+
+                        // If main file is invalid, try temp file
+                        if (!mainFileValid && _tempFile.Exists)
+                        {
+                            try
+                            {
+                                json = File.ReadAllText(_tempFile.FullName);
+                                if (!string.IsNullOrEmpty(json))
+                                {
+                                    var options = new JsonSerializerOptions
+                                    {
+                                        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                                        IgnoreReadOnlyProperties = true,
+                                        ReadCommentHandling = JsonCommentHandling.Skip,
+                                        AllowTrailingCommas = true,
+                                        PropertyNameCaseInsensitive = true
+                                    };
+
+                                    var testConfig = JsonSerializer.Deserialize<Config>(json, options);
+                                    if (testConfig != null)
+                                    {
+                                        config = testConfig;
+                                        EnsureComplexObjectsInitialized(config);
+                                        mainFileValid = true;
+                                        LoneLogging.WriteLine("Recovered config from temp file");
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Temp file is also corrupted
+                            }
+                        }
+
+                        // If still invalid, try backup file
+                        if (!mainFileValid && backupFile.Exists)
+                        {
+                            try
+                            {
+                                json = File.ReadAllText(backupFile.FullName);
+                                if (!string.IsNullOrEmpty(json))
+                                {
+                                    var options = new JsonSerializerOptions
+                                    {
+                                        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+                                        IgnoreReadOnlyProperties = true,
+                                        ReadCommentHandling = JsonCommentHandling.Skip,
+                                        AllowTrailingCommas = true,
+                                        PropertyNameCaseInsensitive = true
+                                    };
+
+                                    var testConfig = JsonSerializer.Deserialize<Config>(json, options);
+                                    if (testConfig != null)
+                                    {
+                                        config = testConfig;
+                                        EnsureComplexObjectsInitialized(config);
+                                        mainFileValid = true;
+                                        LoneLogging.WriteLine("Recovered config from backup file");
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Backup file is also corrupted
+                            }
+                        }
+
+                        // If no valid config found, create new one
+                        if (!mainFileValid)
+                        {
+                            LoneLogging.WriteLine("No valid config found, creating new default config");
                             config = new Config();
                             SaveInternal(config);
                         }
@@ -627,17 +702,64 @@ namespace eft_dma_radar.UI.Misc
 
                 var json = JsonSerializer.Serialize(config, options);
 
+                // Write to temp file first
                 File.WriteAllText(_tempFile.FullName, json);
-                _tempFile.CopyTo(_configFile.FullName, true);
 
+                // Validate the temp file by trying to deserialize it
                 try
                 {
-                    _tempFile.Delete();
+                    var testConfig = JsonSerializer.Deserialize<Config>(json, options);
+                    if (testConfig == null)
+                        throw new InvalidOperationException("Serialized config is null");
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    LoneLogging.WriteLine($"Config validation failed: {ex.Message}");
+                    throw new InvalidOperationException($"Config validation failed: {ex.Message}");
+                }
+
+                // Use atomic move operation instead of copy
+                if (_configFile.Exists)
+                {
+                    // Create backup of existing file
+                    var backupFile = new FileInfo(Path.Combine(Program.ConfigPath.FullName, Filename + ".backup"));
+                    try
+                    {
+                        _configFile.CopyTo(backupFile.FullName, true);
+                    }
+                    catch
+                    {
+                        // Backup creation failed, but continue
+                    }
+                }
+
+                // Atomic move from temp to main file
+                File.Move(_tempFile.FullName, _configFile.FullName, true);
+
+                // Clean up backup file if it exists
+                var backupPath = Path.Combine(Program.ConfigPath.FullName, Filename + ".backup");
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        File.Delete(backupPath);
+                    }
+                    catch
+                    {
+                        // Backup cleanup failed, but that's okay
+                    }
+                }
             }
             catch (Exception ex)
             {
+                // Clean up temp file if it still exists
+                try
+                {
+                    if (_tempFile.Exists)
+                        _tempFile.Delete();
+                }
+                catch { }
+
                 LoneLogging.WriteLine($"Error saving config: {ex.Message}");
                 throw;
             }
@@ -712,13 +834,21 @@ namespace eft_dma_radar.UI.Misc
     {
         [JsonPropertyName("left")]
         public double Left { get; set; }
+
         [JsonPropertyName("top")]
         public double Top { get; set; }
+
+        [JsonPropertyName("width")]
+        public double Width { get; set; }
+
+        [JsonPropertyName("height")]
+        public double Height { get; set; }
 
         public static ToolbarPositionConfig FromToolbar(Border toolbar)
         {
             var left = Canvas.GetLeft(toolbar);
             var top = Canvas.GetTop(toolbar);
+
             if (double.IsNaN(left)) left = 0;
             if (double.IsNaN(top)) top = 0;
 
@@ -726,6 +856,8 @@ namespace eft_dma_radar.UI.Misc
             {
                 Left = left,
                 Top = top,
+                Width = toolbar.Width > 0 ? toolbar.Width : toolbar.ActualWidth,
+                Height = toolbar.Height > 0 ? toolbar.Height : toolbar.ActualHeight
             };
         }
 
@@ -736,16 +868,17 @@ namespace eft_dma_radar.UI.Misc
                 Canvas.SetLeft(toolbar, Left);
                 Canvas.SetTop(toolbar, Top);
 
-                toolbar.ClearValue(FrameworkElement.WidthProperty);
-                toolbar.ClearValue(FrameworkElement.HeightProperty);
+                // Don't restore width - let toolbar auto-size to content
+                // if (Width > 0)
+                //     toolbar.Width = Width;
+
+                if (Height > 0)
+                    toolbar.Height = Height;
             }
             else
             {
                 Canvas.SetLeft(toolbar, 20);
                 Canvas.SetTop(toolbar, 5);
-
-                toolbar.ClearValue(FrameworkElement.WidthProperty);
-                toolbar.ClearValue(FrameworkElement.HeightProperty);
             }
         }
     }
@@ -931,6 +1064,12 @@ namespace eft_dma_radar.UI.Misc
         /// </summary>
         [JsonPropertyName("aimlineLength")]
         public int AimlineLength { get; set; } = 15;
+
+        /// <summary>
+        /// Enable max aimline length when local player is scoped
+        /// </summary>
+        [JsonPropertyName("aimlineWhenScoped")]
+        public bool AimlineWhenScoped { get; set; } = false;
 
         /// <summary>
         /// Show up/down arrows instead of numerical height

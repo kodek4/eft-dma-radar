@@ -342,7 +342,11 @@ namespace eft_dma_radar.Tarkov.Loot
             float distanceYOffset;
             float nameXOffset = 7f * MainWindow.UIScale;
             float nameYOffset;
+            canvas.Save();
 
+            var iconCenterPoint = Position.ToMapPos(mapParams.Map).ToZoomedPos(mapParams);
+            var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, iconCenterPoint.X, iconCenterPoint.Y);
+            canvas.Concat(ref counterRotation);
             if (heightDiff > HEIGHT_INDICATOR_THRESHOLD)
             {
                 using var path = point.GetUpArrow(5);
@@ -389,6 +393,7 @@ namespace eft_dma_radar.Tarkov.Loot
                 canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
                 canvas.DrawText(distText, distPoint, paints.Item2);
             }
+            canvas.Restore();
         }
 
         private Vector3 _position;

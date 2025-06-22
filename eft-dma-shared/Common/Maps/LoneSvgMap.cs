@@ -16,6 +16,10 @@ namespace eft_dma_shared.Common.Maps
 
         public string ID { get; }
         public LoneMapConfig Config { get; }
+              
+public SKImage GetFirstLayerImage() => (_layers != null && _layers.Length > 0) ? _layers[0].Image : null;
+
+    
 
         public LoneSvgMap(ZipArchive zip, string id, LoneMapConfig config)
         {

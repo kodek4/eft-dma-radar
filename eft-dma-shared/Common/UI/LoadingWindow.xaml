@@ -30,7 +30,7 @@
 
             <!-- Header -->
             <Border Grid.Row="0" Background="#333333" CornerRadius="10,10,0,0" Height="25">
-                <TextBlock Text="EFT DMA Radar" 
+                <TextBlock Text="EFT DMA Radar Nikita Gay Edition" 
                            FontWeight="Bold" 
                            FontSize="16" 
                            Foreground="White" 
@@ -82,7 +82,7 @@
                                NavigateUri="https://github.com/lone-dma" 
                                RequestNavigate="githubLink_RequestNavigate"
                                TextDecorations="None">
-                        <TextBlock Text="lone-dma" 
+                        <TextBlock Text="Nikita is Gay" 
                                    Foreground="#0094FF" 
                                    FontWeight="SemiBold"
                                    FontSize="12"/>

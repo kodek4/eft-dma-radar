@@ -1,4 +1,4 @@
-﻿using eft_dma_radar.Tarkov.EFTPlayer.Plugins;
+using eft_dma_radar.Tarkov.EFTPlayer.Plugins;
 using eft_dma_radar.Tarkov.Features;
 using eft_dma_radar.Tarkov.Features.MemoryWrites;
 using eft_dma_radar.Tarkov.GameWorld;
@@ -262,16 +262,15 @@ namespace eft_dma_radar.UI.Pages
                 var clipboardText = Clipboard.GetText();
                 var warningResult = MessageBox.Show(
                         "WARNING: Importing a configuration will replace most current settings including:\n\n" +
-                        "• Compatible general settings & UI preferences\n" +
+                        "• General settings & UI preferences\n" +
                         "• Player/Entity display settings\n" +
-                        "• Color configurations (compatible colors only)\n" +
+                        "• Color configurations\n" +
                         "• Hotkey assignments\n" +
                         "• ESP configurations\n" +
+                        "• Loot settings\n" +
                         "• Panel and toolbar positions\n" +
-                        "• Memory writing settings\n" +
-                        "• And other compatible settings\n\n" +
-                        "NOTE: Incompatible settings will be ignored.\n" +
-                        "Cache settings will be preserved.\n\n" +
+                        "• And other application settings\n\n" +
+                        "NOTE: Cache and WebRadar settings will be preserved.\n\n" +
                         "This action cannot be undone. Continue?",
                         "Import Configuration Warning",
                         MessageBoxButton.YesNo,
@@ -280,15 +279,15 @@ namespace eft_dma_radar.UI.Pages
                 if (warningResult != MessageBoxResult.Yes)
                     return;
 
+                Config importedConfig = null;
+
                 var importButton = this.FindName("mnuImportConfig") as MenuItem;
                 if (importButton != null)
                     importButton.IsEnabled = false;
 
                 try
                 {
-                    Config importedConfig = null;
-
-                    await Task.Run(() =>
+                    importedConfig = await Task.Run(() =>
                     {
                         try
                         {
@@ -298,23 +297,14 @@ namespace eft_dma_radar.UI.Pages
                                 IgnoreReadOnlyProperties = true,
                                 ReadCommentHandling = JsonCommentHandling.Skip,
                                 AllowTrailingCommas = true,
-                                PropertyNameCaseInsensitive = true,
-                                Converters = { new SafeEnumConverter() }
+                                PropertyNameCaseInsensitive = true
                             };
 
-                            importedConfig = JsonSerializer.Deserialize<Config>(clipboardText, options);
-
-                            if (importedConfig == null)
-                            {
-                                throw new InvalidOperationException("Deserialized config is null");
-                            }
-
-                            LoneLogging.WriteLine("[Config] Configuration deserialized successfully with ignored incompatible properties");
+                            return JsonSerializer.Deserialize<Config>(clipboardText, options);
                         }
-                        catch (Exception ex)
+                        catch
                         {
-                            LoneLogging.WriteLine($"[Config] Failed to process configuration: {ex.Message}");
-                            throw new JsonException("Invalid configuration data in clipboard", ex);
+                            return null;
                         }
                     });
 
@@ -334,10 +324,10 @@ namespace eft_dma_radar.UI.Pages
 
                             var currentCache = Config.Cache;
                             var currentWebRadar = Config.WebRadar;
-                            importedConfig.WebRadar = currentWebRadar;
 
-                            Config.EnsureComplexObjectsInitialized(importedConfig);
+                            Misc.Config.EnsureComplexObjectsInitialized(importedConfig);
                             importedConfig.Cache = currentCache;
+                            importedConfig.WebRadar = currentWebRadar;
 
                             if (importedConfig.MemWrites.MemWritesEnabled)
                             {
@@ -414,7 +404,7 @@ namespace eft_dma_radar.UI.Pages
                                         timer.Stop();
                                         mainWindow.EnsureAllPanelsInBounds();
                                         if (mainWindow.customToolbar != null)
-                                            mainWindow.EnsurePanelInBounds(mainWindow.customToolbar, mainWindow.mainContentGrid);
+                                            mainWindow.EnsurePanelInBounds(mainWindow.customToolbar, mainWindow.mainContentGrid, adjustSize: false);
 
                                         LoneLogging.WriteLine("[Config] Panel and toolbar positions applied and validated");
                                     };
@@ -431,7 +421,7 @@ namespace eft_dma_radar.UI.Pages
 
                             Config.Save();
 
-                            LoneLogging.WriteLine("[Config] Configuration imported successfully - compatible settings applied, incompatible ones ignored");
+                            LoneLogging.WriteLine("[Config] Configuration imported successfully - all settings including panel and toolbar positions have been applied");
                         }
                         catch (Exception ex)
                         {
@@ -440,7 +430,7 @@ namespace eft_dma_radar.UI.Pages
                         }
                     });
 
-                    NotificationsShared.Success("Configuration imported successfully! Compatible settings applied, incompatible settings ignored.");
+                    NotificationsShared.Success("[Config] Configuration imported successfully! All panels and toolbar have been positioned within window bounds. Cache and WebRadar settings preserved.");
                 }
                 catch (Exception ex)
                 {
@@ -627,6 +617,8 @@ namespace eft_dma_radar.UI.Pages
             chkHeightIndicator.Unchecked += GeneralCheckbox_Checked;
             chkImportantIndicator.Checked += GeneralCheckbox_Checked;
             chkImportantIndicator.Unchecked += GeneralCheckbox_Checked;
+            chkAimlineWhenScoped.Checked += GeneralCheckbox_Checked;
+            chkAimlineWhenScoped.Unchecked += GeneralCheckbox_Checked;
             sldrPlayerTypeRenderDistance.ValueChanged += GeneralSlider_ValueChanged;
             sldrPlayerTypeAimlineLength.ValueChanged += GeneralSlider_ValueChanged;
             ccbInformation.SelectionChanged += playerInfoCheckComboBox_SelectionChanged;
@@ -757,6 +749,9 @@ namespace eft_dma_radar.UI.Pages
                 cboPlayerType.SelectedIndex = 0;
                 _currentPlayerType = ((ComboBoxItem)cboPlayerType.SelectedItem).Tag.ToString();
                 LoadPlayerTypeSettings(_currentPlayerType);
+                
+                // Set initial visibility for aimline when scoped checkbox
+                chkAimlineWhenScoped.Visibility = _currentPlayerType == "LocalPlayer" ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 
@@ -917,6 +912,7 @@ namespace eft_dma_radar.UI.Pages
 
                 chkHeightIndicator.IsChecked = settings.HeightIndicator;
                 chkImportantIndicator.IsChecked = settings.ImportantIndicator;
+                chkAimlineWhenScoped.IsChecked = settings.AimlineWhenScoped;
                 sldrPlayerTypeRenderDistance.Value = settings.RenderDistance;
                 sldrPlayerTypeAimlineLength.Value = settings.AimlineLength;
 
@@ -946,6 +942,7 @@ namespace eft_dma_radar.UI.Pages
             var settings = Config.PlayerTypeSettings.GetSettings(playerType);
             settings.HeightIndicator = chkHeightIndicator.IsChecked == true;
             settings.ImportantIndicator = chkImportantIndicator.IsChecked == true;
+            settings.AimlineWhenScoped = chkAimlineWhenScoped.IsChecked == true;
             settings.RenderDistance = (int)sldrPlayerTypeRenderDistance.Value;
             settings.AimlineLength = (int)sldrPlayerTypeAimlineLength.Value;
             settings.Information.Clear();
@@ -978,49 +975,28 @@ namespace eft_dma_radar.UI.Pages
                         item.IsSelected = true;
                     else
                         item.IsSelected = false;
-                }
 
-                switch (entityType)
-                {
-                    case "Grenade":
-                        chkExplosiveRadius.IsChecked = settings.ShowRadius;
-                        break;
-                    case "Door":
-                        chkShowLockedDoors.IsChecked = settings.ShowLockedDoors;
-                        chkShowUnlockedDoors.IsChecked = settings.ShowUnlockedDoors;
-                        break;
-                    case "Exfil":
-                        chkHideInactive.IsChecked = settings.HideInactiveExfils;
-                        break;
-                    case "Tripwire":
-                        chkShowTripwireLine.IsChecked = settings.ShowTripwireLine;
-                        break;
+                    switch (entityType)
+                    {
+                        case "Grenade":
+                            chkExplosiveRadius.IsChecked = settings.ShowRadius;
+                            break;
+                        case "Door":
+                            chkShowLockedDoors.IsChecked = settings.ShowLockedDoors;
+                            chkShowUnlockedDoors.IsChecked = settings.ShowUnlockedDoors;
+                            break;
+                        case "Exfil":
+                            chkHideInactive.IsChecked = settings.HideInactiveExfils;
+                            break;
+                        case "Tripwire":
+                            chkShowTripwireLine.IsChecked = settings.ShowTripwireLine;
+                            break;
+                    }
                 }
             }
             finally
             {
                 _isLoadingEntitySettings = false;
-            }
-
-            grenadeSettings.Visibility = Visibility.Collapsed;
-            doorSettings.Visibility = Visibility.Collapsed;
-            exfilSettings.Visibility = Visibility.Collapsed;
-            tripwireSettings.Visibility = Visibility.Collapsed;
-
-            switch (_currentEntityType)
-            {
-                case "Grenade":
-                    grenadeSettings.Visibility = Visibility.Visible;
-                    break;
-                case "Door":
-                    doorSettings.Visibility = Visibility.Visible;
-                    break;
-                case "Exfil":
-                    exfilSettings.Visibility = Visibility.Visible;
-                    break;
-                case "Tripwire":
-                    tripwireSettings.Visibility = Visibility.Visible;
-                    break;
             }
         }
 
@@ -1395,6 +1371,7 @@ namespace eft_dma_radar.UI.Pages
                         break;
                     case "PlayerHeightIndicator":
                     case "ImportantIndicator":
+                    case "AimlineWhenScoped":
                         SavePlayerTypeSettings();
                         break;
                     case "ShowExplosiveRadius":
@@ -1717,6 +1694,9 @@ namespace eft_dma_radar.UI.Pages
 
                 _currentPlayerType = item.Tag.ToString();
                 LoadPlayerTypeSettings(_currentPlayerType);
+                
+                // Show aimline when scoped checkbox only for LocalPlayer
+                chkAimlineWhenScoped.Visibility = _currentPlayerType == "LocalPlayer" ? Visibility.Visible : Visibility.Collapsed;
             }
         }
 
@@ -1733,6 +1713,27 @@ namespace eft_dma_radar.UI.Pages
 
                 _currentEntityType = item.Tag.ToString();
                 LoadEntityTypeSettings(_currentEntityType);
+
+                grenadeSettings.Visibility = Visibility.Collapsed;
+                doorSettings.Visibility = Visibility.Collapsed;
+                exfilSettings.Visibility = Visibility.Collapsed;
+                tripwireSettings.Visibility = Visibility.Collapsed;
+
+                switch (_currentEntityType)
+                {
+                    case "Grenade":
+                        grenadeSettings.Visibility = Visibility.Visible;
+                        break;
+                    case "Door":
+                        doorSettings.Visibility = Visibility.Visible;
+                        break;
+                    case "Exfil":
+                        exfilSettings.Visibility = Visibility.Visible;
+                        break;
+                    case "Tripwire":
+                        tripwireSettings.Visibility = Visibility.Visible;
+                        break;
+                }
             }
         }
 

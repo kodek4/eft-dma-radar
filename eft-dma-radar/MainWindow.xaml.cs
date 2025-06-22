@@ -57,6 +57,7 @@ namespace eft_dma_radar
         private DispatcherTimer _sizeChangeTimer;
         private readonly Stopwatch _fpsSw = new();
         private readonly PrecisionTimer _renderTimer;
+        private readonly DispatcherTimer _widgetUpdateTimer;
 
         private IMouseoverEntity _mouseOverItem;
         private bool _mouseDown;
@@ -67,7 +68,8 @@ namespace eft_dma_radar
 
         private int _fps;
         private int _zoom = 100;
-        public int _rotationDegrees = 0;
+        private int _rotationAngle = 0;
+        public static int RotationDegrees { get; private set; } = 0;
         private bool _freeMode = false;
         private bool _isDraggingToolbar = false;
         private Point _toolbarDragStartPoint;
@@ -260,7 +262,26 @@ namespace eft_dma_radar
         private List<Tarkov.GameWorld.Exits.Switch> Switches = new List<Tarkov.GameWorld.Exits.Switch>();
         public static List<Tarkov.GameWorld.Interactables.Door> Doors = new List<Tarkov.GameWorld.Interactables.Door>();
         #endregion
+        private SKPoint GetTransformedMousePosition(Point rawPosition)
+        {
+            // If there's no rotation, we don't need to do anything.
+            if (RotationDegrees == 0)
+            {
+                return new SKPoint((float)rawPosition.X, (float)rawPosition.Y);
+            }
 
+            // Get the center of the canvas, which is our rotation pivot.
+            var centerX = (float)skCanvas.ActualWidth / 2;
+            var centerY = (float)skCanvas.ActualHeight / 2;
+
+            // Create a matrix that performs the INVERSE rotation around the center point.
+            // This single method call is safer than building the matrix manually.
+            // We use the NEGATIVE angle to reverse the canvas rotation.
+            var inverseRotationMatrix = SKMatrix.CreateRotationDegrees(-RotationDegrees, centerX, centerY);
+
+            // Apply the inverse matrix to the raw mouse point to get its logical position.
+            return inverseRotationMatrix.MapPoint(new SKPoint((float)rawPosition.X, (float)rawPosition.Y));
+        }
         public MainWindow()
         {
             InitializeComponent();
@@ -283,6 +304,11 @@ namespace eft_dma_radar
 
             var interval = TimeSpan.FromMilliseconds(1000d / Config.RadarTargetFPS);
             _renderTimer = new(interval);
+            
+            // Widget update timer should match the main render timer FPS, not be hardcoded
+            _widgetUpdateTimer = new DispatcherTimer();
+            _widgetUpdateTimer.Interval = interval; // Match RadarTargetFPS instead of hardcoded 60 FPS
+            _widgetUpdateTimer.Tick += WidgetUpdateTimer_Tick;
 
             this.MouseDoubleClick += MainWindow_MouseDoubleClick;
             this.Closing += MainWindow_Closing;
@@ -307,6 +333,9 @@ namespace eft_dma_radar
             Initialized = true;
             InitializePanels();
             InitializeUIActivityMonitoring();
+            
+            // Allow WidgetCanvas to pass through events when not hitting widgets
+            WidgetCanvas.PreviewMouseLeftButtonDown += WidgetCanvas_PreviewMouseLeftButtonDown;
         }
 
         private void btnDebug_Click(object sender, RoutedEventArgs e)
@@ -339,9 +368,7 @@ namespace eft_dma_radar
                 UpdateSmoothValues();
 
                 SetFPS(inRaid, canvas);
-                // Check for map switch
                 var mapID = MapID;
-                //LoneLogging.WriteLine($"[DEBUG] MapID = {mapID}");
 
                 if (string.IsNullOrWhiteSpace(mapID))
                     return;
@@ -352,59 +379,148 @@ namespace eft_dma_radar
                     UpdateSwitches();
                 }
 
-                canvas.Clear(InterfaceColorOptions.RadarBackgroundColor); // Clear canvas
+                canvas.Clear(InterfaceColorOptions.RadarBackgroundColor);
 
-                if (inRaid && localPlayer is not null) // LocalPlayer is in a raid -> Begin Drawing...
+
+                //
+                // ----- BEGIN WORLD-SPACE DRAWING (Elements that should rotate with the map) -----
+                //
+                if (inRaid && localPlayer is not null)
                 {
-                    //LoneLogging.WriteLine($"[DEBUG] InRaid = {inRaid}, LocalPlayer = {(localPlayer != null)}");
-                    var map = LoneMapManager.Map; // Cache ref
+                    var map = LoneMapManager.Map;
                     ArgumentNullException.ThrowIfNull(map, nameof(map));
-                    var closestToMouse = _mouseOverItem; // cache ref
-                    var mouseOverGrp = MouseoverGroup; // cache value for entire render
-                                                       // Get LocalPlayer location
+                    var closestToMouse = _mouseOverItem; // For mouseover logic
+
                     var localPlayerPos = localPlayer.Position;
                     var localPlayerMapPos = localPlayerPos.ToMapPos(map.Config);
 
-                    // Prepare to draw Game Map - use smooth zoom/pan values
-                    LoneMapParams mapParams; // Drawing Source
+                    Vector2 centerOfViewOnMapTexture;
                     if (_freeMode)
-                        mapParams = map.GetParameters(skCanvas, (int)_currentZoom, ref _currentPanPosition);
-                    else
-                        mapParams = map.GetParameters(skCanvas, (int)_currentZoom, ref localPlayerMapPos);
-
-                    if (GeneralSettingsControl.chkMapSetup.IsChecked == true)
-                        MapSetupControl.UpdatePlayerPosition(localPlayer);
-
-                    var mapCanvasBounds = new SKRect() // Drawing Destination
                     {
-                        Left = 0,
-                        Right = (float)skCanvas.ActualWidth,
-                        Top = 0,
-                        Bottom = (float)skCanvas.ActualHeight
-                    };
+                        centerOfViewOnMapTexture = _currentPanPosition;
+                    }
+                    else
+                    {
+                        centerOfViewOnMapTexture = localPlayerMapPos;
+                    }
 
-                    // Get the center of the canvas
-                    var centerX = (mapCanvasBounds.Left + mapCanvasBounds.Right) / 2;
-                    var centerY = (mapCanvasBounds.Top + mapCanvasBounds.Bottom) / 2;
+                    var zoomForGetParams = _currentZoom;
+                    if (MainWindow.RotationDegrees == 90 || MainWindow.RotationDegrees == 270)
+                    {
+                        if (skCanvas.ActualWidth > 0 && skCanvas.ActualHeight > 0 && skCanvas.ActualWidth > skCanvas.ActualHeight)
+                        {
+                            var canvasAspectRatio = (float)skCanvas.ActualWidth / (float)skCanvas.ActualHeight;
+                            zoomForGetParams *= canvasAspectRatio;
+                        }
+                    }
 
-                    // Apply a rotation transformation to the canvas
-                    canvas.RotateDegrees(_rotationDegrees, centerX, centerY);
+                    LoneMapParams mapParams = map.GetParameters(
+                        skCanvas,
+                        (int)Math.Max(1.0f, zoomForGetParams),
+                        ref centerOfViewOnMapTexture
+                    );
 
-                    // Draw Map
-                    map.Draw(canvas, localPlayer.Position.Y, mapParams.Bounds, mapCanvasBounds);
+                    var mapDestinationRect = new SKRect(0, 0, (float)skCanvas.ActualWidth, (float)skCanvas.ActualHeight);
 
-                    // Update 'important' / quest item asterisk
+                    map.Draw(canvas, localPlayer.Position.Y, mapParams.Bounds, mapDestinationRect);
+
+
                     SKPaints.UpdatePulsingAsteriskColor();
+                    // Note: localPlayer.Draw moved to after static containers
 
-                    // Draw LocalPlayer
-                    localPlayer.Draw(canvas, mapParams, localPlayer);
-
-                    // Draw other players
-                    var allPlayers = AllPlayers?
-                        .Where(x => !x.HasExfild);
-
+                    var allPlayers = AllPlayers?.Where(x => !x.HasExfild);
                     var battleMode = Config.BattleMode;
 
+                    // Draw Containers, Loot, Quest Items, Mines, Explosives, Exits, Switches, Doors, and finally Players
+                    // (All of this existing drawing logic is correct and remains unchanged)
+                    #region World-Space Drawing Logic (No Change)
+                    if (!battleMode && (Config.ProcessLoot && (LootItem.CorpseSettings.Enabled || LootItem.LootSettings.Enabled || LootItem.ImportantLootSettings.Enabled || LootItem.QuestItemSettings.Enabled)))
+                    {
+                        var loot = Loot?.Where(x => x is not QuestItem).Reverse();
+                        if (loot is not null)
+                        {
+                            foreach (var item in loot)
+                            {
+                                if (!LootItem.CorpseSettings.Enabled && item is LootCorpse)
+                                    continue;
+                                item.CheckNotify();
+                                item.Draw(canvas, mapParams, localPlayer);
+                            }
+                        }
+                    }
+                    if (!battleMode && Config.QuestHelper.Enabled)
+                    {
+                        if (LootItem.QuestItemSettings.Enabled && !localPlayer.IsScav)
+                        {
+                            var questItems = Loot?.Where(x => x is QuestItem);
+                            if (questItems is not null)
+                                foreach (var item in questItems)
+                                    item.Draw(canvas, mapParams, localPlayer);
+                        }
+                        if (QuestManager.Settings.Enabled && !localPlayer.IsScav)
+                        {
+                            var questLocations = Memory.QuestManager?.LocationConditions;
+                            if (questLocations is not null)
+                                foreach (var loc in questLocations)
+                                    loc.Draw(canvas, mapParams, localPlayer);
+                        }
+                    }
+                    if (MineEntitySettings.Enabled && GameData.Mines.TryGetValue(mapID, out var mines))
+                    {
+                        foreach (ref var mine in mines.Span)
+                        {
+                            var dist = Vector3.Distance(localPlayer.Position, mine);
+                            if (dist > MineEntitySettings.RenderDistance)
+                                continue;
+                            var mineZoomedPos = mine.ToMapPos(map.Config).ToZoomedPos(mapParams);
+                            var length = 3.5f * MainWindow.UIScale;
+                            canvas.DrawLine(new SKPoint(mineZoomedPos.X - length, mineZoomedPos.Y + length), new SKPoint(mineZoomedPos.X + length, mineZoomedPos.Y - length), SKPaints.PaintExplosives);
+                            canvas.DrawLine(new SKPoint(mineZoomedPos.X - length, mineZoomedPos.Y - length), new SKPoint(mineZoomedPos.X + length, mineZoomedPos.Y + length), SKPaints.PaintExplosives);
+                        }
+                    }
+                    if (Tripwire.Settings.Enabled || Grenade.Settings.Enabled || MortarProjectile.Settings.Enabled)
+                    {
+                        var explosives = Explosives;
+                        if (explosives is not null)
+                        {
+                            foreach (var explosive in explosives)
+                            {
+                                explosive.Draw(canvas, mapParams, localPlayer);
+                            }
+                        }
+                    }
+                    if (!battleMode && (Exfil.Settings.Enabled || TransitPoint.Settings.Enabled))
+                    {
+                        var exits = Exits;
+                        if (exits is not null)
+                        {
+                            foreach (var exit in exits)
+                            {
+                                if (exit is Exfil exfil && !localPlayer.IsPmc && exfil.Status is Exfil.EStatus.Closed)
+                                    continue;
+                                exit.Draw(canvas, mapParams, localPlayer);
+                            }
+                        }
+                    }
+                    if (!battleMode && Switch.Settings.Enabled)
+                        foreach (var swtch in Switches)
+                            swtch.Draw(canvas, mapParams, localPlayer);
+                    if (!battleMode && Door.Settings.Enabled)
+                    {
+                        var doorsSet = Memory.Game?.Interactables._Doors;
+                        if (doorsSet is not null && doorsSet.Count > 0)
+                        {
+                            Doors = doorsSet.ToList();
+                            foreach (var door in Doors)
+                                door.Draw(canvas, mapParams, localPlayer);
+                        }
+                        else
+                        {
+                            Doors = null;
+                        }
+                    }
+                    
+                    // Draw Static Containers BEFORE players but after other world entities
                     if (!battleMode && Config.Containers.Show && StaticLootContainer.Settings.Enabled)
                     {
                         var containers = Containers;
@@ -416,103 +532,13 @@ namespace eft_dma_radar
                                 {
                                     if (Config.Containers.HideSearched && container.Searched)
                                         continue;
-
                                     container.Draw(canvas, mapParams, localPlayer);
                                 }
                             }
                         }
                     }
-
-                    if (!battleMode && (Config.ProcessLoot &&
-                        (LootItem.CorpseSettings.Enabled ||
-                        LootItem.LootSettings.Enabled ||
-                        LootItem.ImportantLootSettings.Enabled ||
-                        LootItem.QuestItemSettings.Enabled)))
-                    {
-                        var loot = Loot?.Where(x => x is not QuestItem).Reverse(); // QuestItem objects handled below
-                        if (loot is not null)
-                        {
-                            foreach (var item in loot)
-                            {
-                                if (!LootItem.CorpseSettings.Enabled && item is LootCorpse)
-                                    continue;
-
-                                item.CheckNotify();
-                                item.Draw(canvas, mapParams, localPlayer);
-                            }
-                        }
-                    }
-
-                    if (!battleMode && Config.QuestHelper.Enabled)
-                    {
-                        if (LootItem.QuestItemSettings.Enabled && !localPlayer.IsScav)
-                        {
-                            var questItems = Loot?.Where(x => x is QuestItem);
-                            if (questItems is not null)
-                                foreach (var item in questItems)
-                                    item.Draw(canvas, mapParams, localPlayer);
-                        }
-
-                        if (QuestManager.Settings.Enabled && !localPlayer.IsScav)
-                        {
-                            var questLocations = Memory.QuestManager?.LocationConditions;
-                            if (questLocations is not null)
-                                foreach (var loc in questLocations)
-                                    loc.Draw(canvas, mapParams, localPlayer);
-                        }
-                    }
-
-                    if (MineEntitySettings.Enabled && GameData.Mines.TryGetValue(mapID, out var mines))
-                    {
-                        foreach (ref var mine in mines.Span)
-                        {
-                            var dist = Vector3.Distance(localPlayer.Position, mine);
-                            if (dist > MineEntitySettings.RenderDistance)
-                                continue;
-
-                            var mineZoomedPos = mine.ToMapPos(map.Config).ToZoomedPos(mapParams);
-
-                            var length = 3.5f * MainWindow.UIScale;
-
-                            canvas.DrawLine(new SKPoint(mineZoomedPos.X - length, mineZoomedPos.Y + length),
-                                           new SKPoint(mineZoomedPos.X + length, mineZoomedPos.Y - length),
-                                           SKPaints.PaintExplosives);
-                            canvas.DrawLine(new SKPoint(mineZoomedPos.X - length, mineZoomedPos.Y - length),
-                                           new SKPoint(mineZoomedPos.X + length, mineZoomedPos.Y + length),
-                                           SKPaints.PaintExplosives);
-                        }
-                    }
-
-                    if (Tripwire.Settings.Enabled ||
-                        Grenade.Settings.Enabled ||
-                        MortarProjectile.Settings.Enabled)
-                    {
-                        var explosives = Explosives;
-                        if (explosives is not null)
-                        {
-                            foreach (var explosive in explosives)
-                            {
-                                explosive.Draw(canvas, mapParams, localPlayer);
-                            }
-                        }
-                    }
-
-                    if (!battleMode && (Exfil.Settings.Enabled ||
-                        TransitPoint.Settings.Enabled))
-                    {
-                        var exits = Exits;
-                        if (exits is not null)
-                        {
-                            foreach (var exit in exits)
-                            {
-                                if (exit is Exfil exfil && !localPlayer.IsPmc && exfil.Status is Exfil.EStatus.Closed)
-                                    continue; // Only draw available SCAV Exfils
-
-                                exit.Draw(canvas, mapParams, localPlayer);
-                            }
-                        }
-                    }
-
+                    
+                    // Draw Players so they appear on top of all world entities
                     if (allPlayers is not null)
                         foreach (var player in allPlayers)
                         {
@@ -520,7 +546,6 @@ namespace eft_dma_radar
                                 continue;
                             player.Draw(canvas, mapParams, localPlayer);
                         }
-
                     if (Config.ConnectGroups)
                     {
                         var groupedPlayers = allPlayers?.Where(x => x.IsHumanHostileActive && x.GroupID != -1);
@@ -532,60 +557,27 @@ namespace eft_dma_radar
                                 var grpMembers = groupedPlayers.Where(x => x.GroupID == grp).ToList();
                                 if (grpMembers.Count > 1)
                                 {
-                                    var positions = grpMembers
-                                        .Select(x => x.Position.ToMapPos(map.Config).ToZoomedPos(mapParams))
-                                        .ToArray();
-
+                                    var positions = grpMembers.Select(x => x.Position.ToMapPos(map.Config).ToZoomedPos(mapParams)).ToArray();
                                     for (int i = 0; i < positions.Length - 1; i++)
                                     {
-                                        canvas.DrawLine(
-                                            positions[i].X, positions[i].Y,
-                                            positions[i + 1].X, positions[i + 1].Y,
-                                            SKPaints.PaintConnectorGroup);
+                                        canvas.DrawLine(positions[i].X, positions[i].Y, positions[i + 1].X, positions[i + 1].Y, SKPaints.PaintConnectorGroup);
                                     }
                                 }
                             }
                         }
                     }
+                    
+                    // Draw mouseover effects AFTER players so hover is on top
+                    closestToMouse?.DrawMouseover(canvas, mapParams, localPlayer);
+                    
+                    // Draw local player AFTER static containers so it appears on top
+                    localPlayer.Draw(canvas, mapParams, localPlayer);
+                    #endregion
 
-                    if (!battleMode && Switch.Settings.Enabled)
-                        foreach (var swtch in Switches)
-                            swtch.Draw(canvas, mapParams, localPlayer);
-
-                    if (!battleMode && Door.Settings.Enabled)
-                    {
-                        var doorsSet = Memory.Game?.Interactables._Doors;
-                        if (doorsSet is not null && doorsSet.Count > 0)
-                        {
-                            Doors = doorsSet.ToList();
-
-                            foreach (var door in Doors)
-                                door.Draw(canvas, mapParams, localPlayer);
-                        }
-                        else
-                        {
-                            Doors = null;
-                        }
-                    }
-
-                    if (allPlayers is not null && Config.ShowInfoTab) // Players Overlay
-                        _playerInfo?.Draw(canvas, localPlayer, allPlayers);
-
-                    closestToMouse?.DrawMouseover(canvas, mapParams, localPlayer); // draw tooltip for object the mouse is closest to
-
-                    if (Config.ESPWidgetEnabled)
-                        _aimview?.Draw(canvas);
-
-                    if (Config.ShowDebugWidget)
-                        _debugInfo?.Draw(canvas);
-
-                    if (Config.ShowLootInfoWidget)
-                        _lootInfo?.Draw(canvas, UnfilteredLoot);
-
+                    // FIX: Draw pings and mouseover here so they rotate with the map
                     if (_activePings.Count > 0)
                     {
                         var now = DateTime.UtcNow;
-
                         foreach (var ping in _activePings.ToList())
                         {
                             var elapsed = (float)(now - ping.StartTime).TotalSeconds;
@@ -594,13 +586,10 @@ namespace eft_dma_radar
                                 _activePings.Remove(ping);
                                 continue;
                             }
-
                             float progress = elapsed / ping.DurationSeconds;
                             float radius = 10 + 50 * progress;
                             float alpha = 1f - progress;
-
                             var center = ping.Position.ToMapPos(map.Config).ToZoomedPos(mapParams);
-
                             using var paint = new SKPaint
                             {
                                 Style = SKPaintStyle.Stroke,
@@ -608,10 +597,33 @@ namespace eft_dma_radar
                                 Color = new SKColor(0, 255, 255, (byte)(alpha * 255)),
                                 IsAntialias = true
                             };
-
                             canvas.DrawCircle(center.X, center.Y, radius, paint);
                         }
                     }
+                }
+
+                //
+                // ----- BEGIN SCREEN-SPACE UI DRAWING (Elements that should NOT rotate) -----
+                //
+                canvas.Save(); // 1. Save the current state (which is rotated by WPF)
+
+                // 2. Create and apply the counter-rotation matrix if needed
+                var skCanvasCenterX = (float)skCanvas.ActualWidth / 2f;
+                var skCanvasCenterY = (float)skCanvas.ActualHeight / 2f;
+                if (RotationDegrees != 0)
+                {
+                    var inverseWpfRotationMatrix = SKMatrix.CreateRotationDegrees(
+                        -RotationDegrees,
+                        skCanvasCenterX,
+                        skCanvasCenterY
+                    );
+                    canvas.Concat(ref inverseWpfRotationMatrix); // 3. Apply the counter-rotation
+                }
+
+                // 4. Draw UI elements that should be unaffected by rotation
+                if (inRaid && localPlayer is not null)
+                {
+                    // Widgets are now drawn on separate WidgetCanvas - see UpdateWidgets() method
                 }
                 else // LocalPlayer is *not* in a Raid -> Display Reason
                 {
@@ -622,15 +634,538 @@ namespace eft_dma_radar
                     else if (!inRaid)
                         WaitingForRaidStatus(canvas);
                 }
+    
 
-                SetStatusText(canvas);
+                canvas.Restore(); // 5. Restore the canvas to its original rotated state for the next frame
+
                 canvas.Flush(); // commit frame to GPU
+                
+                // Update widgets on separate non-rotated canvas
+                UpdateWidgets();
             }
             catch (Exception ex) // Log rendering errors
             {
                 LoneLogging.WriteLine($"CRITICAL RENDER ERROR: {ex}");
             }
         }
+
+        /// <summary>
+        /// Update widgets on the separate WidgetCanvas that's not affected by rotation
+        /// </summary>
+        private bool _widgetsInitialized = false;
+        private bool _lastShowInfoTab = false;
+        private bool _lastESPWidgetEnabled = false;
+        private bool _lastShowDebugWidget = false;
+        private bool _lastShowLootInfoWidget = false;
+
+        private bool WidgetVisibilityChanged()
+        {
+            return _lastShowInfoTab != Config.ShowInfoTab ||
+                   _lastESPWidgetEnabled != Config.ESPWidgetEnabled ||
+                   _lastShowDebugWidget != Config.ShowDebugWidget ||
+                   _lastShowLootInfoWidget != Config.ShowLootInfoWidget;
+        }
+
+        private void UpdateWidgetVisibilityState()
+        {
+            _lastShowInfoTab = Config.ShowInfoTab;
+            _lastESPWidgetEnabled = Config.ESPWidgetEnabled;
+            _lastShowDebugWidget = Config.ShowDebugWidget;
+            _lastShowLootInfoWidget = Config.ShowLootInfoWidget;
+        }
+
+        private void UpdateWidgets()
+        {
+            try
+            {
+                var inRaid = InRaid;
+                var localPlayer = LocalPlayer;
+                
+                if (!inRaid || localPlayer is null) 
+                {
+                    // Clear widgets when not in raid
+                    if (_widgetsInitialized)
+                    {
+                        WidgetCanvas.Children.Clear();
+                        _widgetElements.Clear();
+                        _statusTextElement = null;
+                        _widgetsInitialized = false;
+                    }
+                    return;
+                }
+                
+
+
+                // Recreate widgets if visibility settings changed
+                if (_widgetsInitialized && WidgetVisibilityChanged())
+                {
+                    WidgetCanvas.Children.Clear();
+                    _widgetElements.Clear();
+                    _widgetsInitialized = false;
+                }
+
+                // Only create widgets once, not every frame
+                if (!_widgetsInitialized)
+                {
+                    WidgetCanvas.Children.Clear();
+                    _widgetElements.Clear();
+
+                    // Create SKElement for each widget on the unrotated canvas
+                    if (AllPlayers is not null && Config.ShowInfoTab && _playerInfo != null)
+                        AddWidgetToCanvas(_playerInfo);
+
+                    if (Config.ESPWidgetEnabled && _aimview != null)
+                        AddWidgetToCanvas(_aimview);
+
+                    if (Config.ShowDebugWidget && _debugInfo != null)
+                        AddWidgetToCanvas(_debugInfo);
+
+                    if (Config.ShowLootInfoWidget && _lootInfo != null)
+                        AddWidgetToCanvas(_lootInfo);
+                        
+                    // Add status text here so it doesn't get cleared
+                    CreateStatusTextElement();
+                        
+                    UpdateWidgetVisibilityState();
+                    _widgetsInitialized = true;
+                }
+                else
+                {
+                    // Update status text content
+                    UpdateStatusTextContent();
+                }
+                    
+                // Don't invalidate all widgets every frame - let them manage their own refresh cycles
+                // InvalidateWidgets(); // REMOVED: This was causing performance issues
+            }
+            catch (Exception ex)
+            {
+                LoneLogging.WriteLine($"Error updating widgets: {ex.Message}");
+            }
+        }
+
+        // Store widget elements for invalidation
+        private readonly Dictionary<SKWidget, SkiaSharp.Views.WPF.SKElement> _widgetElements = new Dictionary<SKWidget, SkiaSharp.Views.WPF.SKElement>();
+        
+        // Status text element on widget canvas
+        private System.Windows.Controls.TextBlock _statusTextElement;
+        
+        // Debug info for widget clicks
+        private DateTime _lastWidgetClickTime = DateTime.MinValue;
+        
+                
+        
+        // Throttling for widget invalidation during resize
+        private readonly Dictionary<SKWidget, DateTime> _lastInvalidationTime = new Dictionary<SKWidget, DateTime>();
+
+        /// <summary>
+        /// Add a widget to the separate WidgetCanvas
+        /// </summary>
+        private void AddWidgetToCanvas(SKWidget widget, params object[] drawParams)
+        {
+            try
+            {
+                // Create properly sized SKElement for the widget with performance optimizations
+                var skElement = new SkiaSharp.Views.WPF.SKElement();
+                skElement.Width = widget.Rectangle.Width;
+                skElement.Height = widget.Rectangle.Height;
+                
+                // WPF performance optimizations for smoother ESP widget rendering
+                skElement.SnapsToDevicePixels = true;
+                skElement.UseLayoutRounding = true;
+                skElement.ClipToBounds = true;
+                
+                // Position it
+                Canvas.SetLeft(skElement, widget.Location.X);
+                Canvas.SetTop(skElement, widget.Location.Y);
+                
+                // Store for later invalidation
+                _widgetElements[widget] = skElement;
+                
+                // Store last known size to avoid unnecessary updates
+                var lastKnownSize = widget.Rectangle;
+                
+                // Add mouse handling variables (declared before PaintSurface to be accessible)
+                bool isDragging = false;
+                bool isResizing = false;
+                Point dragStartPoint = new Point();
+                
+                // Handle painting - draw widget content at origin (0,0) since element is already positioned
+                skElement.PaintSurface += (s, e) =>
+                {
+                    var canvas = e.Surface.Canvas;
+                    canvas.Clear(SKColors.Transparent);
+                    
+                    // Ensure SKElement size is correct BEFORE drawing (fix for low resolution ESP widget issue)
+                    var currentRect = widget.Rectangle;
+                    if (!isResizing && 
+                        (Math.Abs(lastKnownSize.Width - currentRect.Width) > 1 || 
+                         Math.Abs(lastKnownSize.Height - currentRect.Height) > 1))
+                    {
+                        // Update size immediately, not asynchronously, to ensure correct drawing resolution
+                        skElement.Width = currentRect.Width;
+                        skElement.Height = currentRect.Height;
+                        lastKnownSize = currentRect;
+                        
+                        // Clear and redraw with correct size
+                        canvas.Clear(SKColors.Transparent);
+                    }
+                    
+                    // Temporarily adjust widget location to 0,0 for drawing since element is positioned
+                    var originalLocation = widget.Location;
+                    widget.Location = new SKPoint(0, 0);
+                    
+                    // Draw the widget using their actual Draw methods with current data
+                    if (widget is PlayerInfoWidget playerInfo)
+                        playerInfo.Draw(canvas, LocalPlayer, AllPlayers);
+                    else if (widget is EspWidget espWidget)
+                        espWidget.Draw(canvas);
+                    else if (widget is DebugInfoWidget debugWidget)
+                        debugWidget.Draw(canvas);
+                    else if (widget is LootInfoWidget lootWidget)
+                        lootWidget.Draw(canvas, UnfilteredLoot);
+                    
+                    // Restore original location
+                    widget.Location = originalLocation;
+                };
+                
+                skElement.PreviewMouseLeftButtonDown += (s, e) =>
+                {
+                    // Get mouse position relative to the SKElement (0,0 to element size)
+                    var elementMousePos = e.GetPosition(skElement);
+                    
+                    // Convert to widget coordinates - add the widget's current location since HitTest expects absolute coordinates
+                    var widgetCoords = new SKPoint(
+                        (float)elementMousePos.X + widget.Location.X, 
+                        (float)elementMousePos.Y + widget.Location.Y
+                    );
+                    
+                    // Use widget's actual hit testing
+                    var hitTest = widget.HitTest(widgetCoords);
+                    
+                    // Update debug info
+    
+                    _lastWidgetClickTime = DateTime.UtcNow;
+                    
+                    if (hitTest == WidgetClickEvent.ClickedMinimize)
+                    {
+                        // Let the widget handle minimize
+                        widget.ToggleMinimized();
+                        
+                        // Save minimized state to config
+                        SaveWidgetToConfig(widget);
+                        
+                        // SKElement size will be updated in PaintSurface
+                        skElement.InvalidateVisual();
+                        e.Handled = true;
+                        return;
+                    }
+                    else if (hitTest == WidgetClickEvent.ClickedResize)
+                    {
+                        // Start resizing
+                        isResizing = true;
+                        dragStartPoint = e.GetPosition(WidgetCanvas);
+                        skElement.CaptureMouse();
+                        NotifyUIActivity(); // Reduce widget invalidation frequency during resize
+                        e.Handled = true;
+                    }
+                    else if (hitTest == WidgetClickEvent.ClickedTitleBar)
+                    {
+                        // Start dragging
+                        isDragging = true;
+                        dragStartPoint = e.GetPosition(WidgetCanvas);
+                        skElement.CaptureMouse();
+                        NotifyUIActivity(); // Reduce widget invalidation frequency during drag
+                        e.Handled = true;
+                    }
+                };
+                
+                skElement.MouseMove += (s, e) =>
+                {
+                    if (isDragging)
+                    {
+                        var currentPosition = e.GetPosition(WidgetCanvas);
+                        var deltaX = currentPosition.X - dragStartPoint.X;
+                        var deltaY = currentPosition.Y - dragStartPoint.Y;
+                        
+                        // Only update if the delta is significant (reduce update frequency for better performance)
+                        if (Math.Abs(deltaX) > 1 || Math.Abs(deltaY) > 1)
+                        {
+                            var newLeft = Canvas.GetLeft(skElement) + deltaX;
+                            var newTop = Canvas.GetTop(skElement) + deltaY;
+                            
+                            // Update position
+                            Canvas.SetLeft(skElement, newLeft);
+                            Canvas.SetTop(skElement, newTop);
+                            
+                            // Update widget's stored location
+                            widget.Location = new SKPoint((float)newLeft, (float)newTop);
+                            
+                            dragStartPoint = currentPosition;
+                        }
+                        e.Handled = true;
+                    }
+                    else if (isResizing)
+                    {
+                        var currentPosition = e.GetPosition(WidgetCanvas);
+                        var deltaX = (float)(currentPosition.X - dragStartPoint.X);
+                        var deltaY = (float)(currentPosition.Y - dragStartPoint.Y);
+                        
+                        // Only update if the delta is significant (reduce update frequency)
+                        if (Math.Abs(deltaX) > 2 || Math.Abs(deltaY) > 2)
+                        {
+                            // Update widget size
+                            var currentSize = widget.Size;
+                            var newWidth = Math.Max(100, currentSize.Width + deltaX); // Minimum width
+                            var newHeight = Math.Max(50, currentSize.Height + deltaY); // Minimum height
+                            widget.Size = new SKSize(newWidth, newHeight);
+                            
+                            // Update SKElement size immediately for resize (don't wait for paint)
+                            skElement.Width = widget.Rectangle.Width;
+                            skElement.Height = widget.Rectangle.Height;
+                            
+                            dragStartPoint = currentPosition;
+                        }
+                        e.Handled = true;
+                    }
+                };
+                
+                skElement.MouseLeftButtonUp += (s, e) =>
+                {
+                    if (isDragging || isResizing)
+                    {
+                        isDragging = false;
+                        isResizing = false;
+                        skElement.ReleaseMouseCapture();
+                        
+                        // Save widget position/size to config when drag/resize ends
+                        SaveWidgetToConfig(widget);
+                        
+                        e.Handled = true;
+                    }
+                };
+                
+                // Add to canvas
+                WidgetCanvas.Children.Add(skElement);
+            }
+            catch (Exception ex)
+            {
+                LoneLogging.WriteLine($"Error adding widget {widget.GetType().Name} to canvas: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Invalidate all widgets to trigger redraw (use sparingly - only when needed)
+        /// </summary>
+        private void InvalidateWidgets()
+        {
+            var now = DateTime.UtcNow;
+            foreach (var kvp in _widgetElements)
+            {
+                var widget = kvp.Key;
+                var element = kvp.Value;
+                
+                // Throttle invalidation to match Config.RadarTargetFPS
+                var throttleMs = 1000d / Config.RadarTargetFPS;
+                if (!_lastInvalidationTime.TryGetValue(widget, out var lastTime) || 
+                    (now - lastTime).TotalMilliseconds > throttleMs)
+                {
+                    element.InvalidateVisual();
+                    _lastInvalidationTime[widget] = now;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Invalidate widgets with smart refresh rates - ESP at full speed, others throttled
+        /// </summary>
+        private void InvalidateWidgetsThrottled()
+        {
+            var now = DateTime.UtcNow;
+            foreach (var kvp in _widgetElements)
+            {
+                var widget = kvp.Key;
+                var element = kvp.Value;
+                
+                // All widgets should follow the same FPS as the main render timer (Config.RadarTargetFPS)
+                var throttleMs = 1000d / Config.RadarTargetFPS;
+                
+                if (!_lastInvalidationTime.TryGetValue(widget, out var lastTime) || 
+                    (now - lastTime).TotalMilliseconds > throttleMs)
+                {
+                    element.InvalidateVisual();
+                    _lastInvalidationTime[widget] = now;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Create status text element once
+        /// </summary>
+        private void CreateStatusTextElement()
+        {
+            var label = GetStatusLabel();
+            if (!string.IsNullOrEmpty(label))
+            {
+                _statusTextElement = new System.Windows.Controls.TextBlock
+                {
+                    Text = label,
+                    Foreground = new SolidColorBrush(Colors.Orange),
+                    FontSize = 14,
+                    FontWeight = FontWeights.Bold,
+                    IsHitTestVisible = false // Don't interfere with mouse events
+                };
+                
+                // Position at top center
+                var windowWidth = this.ActualWidth > 0 ? this.ActualWidth : this.Width;
+                Canvas.SetLeft(_statusTextElement, (windowWidth / 2) - 100);
+                Canvas.SetTop(_statusTextElement, 10);
+                Canvas.SetZIndex(_statusTextElement, 10000);
+                
+                WidgetCanvas.Children.Add(_statusTextElement);
+            }
+        }
+
+        /// <summary>
+        /// Update status text content
+        /// </summary>
+        private void UpdateStatusTextContent()
+        {
+            if (_statusTextElement != null)
+            {
+                var label = GetStatusLabel();
+                if (!string.IsNullOrEmpty(label))
+                {
+                    _statusTextElement.Text = label;
+                    _statusTextElement.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    _statusTextElement.Visibility = Visibility.Collapsed;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Get the status label text
+        /// </summary>
+        private string GetStatusLabel()
+        {
+            try
+            {
+                
+                var memWritesEnabled = MemWrites.Enabled;
+                var aimEnabled = Aimbot.Config.Enabled;
+                var mode = Aimbot.Config.TargetingMode;
+                string label = null;
+
+                if (memWritesEnabled && Config.MemWrites.RageMode)
+                    label = MemWriteFeature<Aimbot>.Instance.Enabled ? $"{mode.GetDescription()}: RAGE MODE" : "RAGE MODE";
+                else if (memWritesEnabled && aimEnabled)
+                {
+                    if (Aimbot.Config.RandomBone.Enabled)
+                        label = $"{mode.GetDescription()}: Random Bone";
+                    else if (Aimbot.Config.SilentAim.AutoBone)
+                        label = $"{mode.GetDescription()}: Auto Bone";
+                    else
+                    {
+                        var defaultBone = MemoryWritingControl.cboTargetBone.Text;
+                        label = $"{mode.GetDescription()}: {defaultBone}";
+                    }
+                }
+
+                if (memWritesEnabled)
+                {
+                    if (MemWriteFeature<WideLean>.Instance.Enabled)
+                    {
+                        if (label is null)
+                            label = "Lean";
+                        else
+                            label += " (Lean)";
+                    }
+
+                    if (MemWriteFeature<LootThroughWalls>.Instance.Enabled && LootThroughWalls.ZoomEngaged)
+                    {
+                        if (label is null)
+                            label = "LTW";
+                        else
+                            label += " (LTW)";
+                    }
+                    else if (MemWriteFeature<MoveSpeed>.Instance.Enabled)
+                    {
+                        if (label is null)
+                            label = "MOVE";
+                        else
+                            label += " (MOVE)";
+                    }
+                }
+
+                return label;
+            }
+            catch (Exception ex)
+            {
+                return $"Error: {ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// Save widget position and size to config
+        /// </summary>
+        private void SaveWidgetToConfig(SKWidget widget)
+        {
+            try
+            {
+                if (widget == _aimview)
+                {
+                    Config.Widgets.AimviewLocation = widget.Rectangle;
+                    Config.Widgets.AimviewMinimized = widget.Minimized;
+                }
+                else if (widget == _playerInfo)
+                {
+                    Config.Widgets.PlayerInfoLocation = widget.Rectangle;
+                    Config.Widgets.PlayerInfoMinimized = widget.Minimized;
+                }
+                else if (widget == _debugInfo)
+                {
+                    Config.Widgets.DebugInfoLocation = widget.Rectangle;
+                    Config.Widgets.DebugInfoMinimized = widget.Minimized;
+                }
+                else if (widget == _lootInfo)
+                {
+                    Config.Widgets.LootInfoLocation = widget.Rectangle;
+                    Config.Widgets.LootInfoMinimized = widget.Minimized;
+                }
+                
+                // Save config to file
+                Program.Config.Save();
+            }
+            catch (Exception ex)
+            {
+                LoneLogging.WriteLine($"Error saving widget config: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Handle WidgetCanvas mouse events - pass through to map if not hitting a widget
+        /// </summary>
+        private void WidgetCanvas_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            // Check if the mouse is over any widget SKElement
+            var hitElement = WidgetCanvas.InputHitTest(e.GetPosition(WidgetCanvas));
+            
+            // If we didn't hit a widget SKElement, allow the event to pass through to the map
+            if (hitElement == WidgetCanvas)
+            {
+                // This means we hit the canvas itself, not a child element
+                // Don't handle the event so it passes through to underlying elements
+                return;
+            }
+            
+            // If we hit a widget SKElement, the widget will handle its own events
+            // We don't need to do anything here
+        }
+
+
 
         public static void PingItem(string itemName)
         {
@@ -657,17 +1192,19 @@ namespace eft_dma_radar
         private void SkCanvas_MouseDown(object sender, MouseButtonEventArgs e)
         {
             NotifyUIActivity();
-
-            if (!InRaid)
-                return;
+            if (!InRaid) return;
 
             _mouseDown = true;
-            _lastMousePosition = e.GetPosition(skCanvas);
+            _lastMousePosition = e.GetPosition(skCanvas); // Raw position, used for panning delta
 
             var shouldCheckMouseover = e.RightButton != MouseButtonState.Pressed;
 
             if (shouldCheckMouseover)
-                CheckMouseoverItems(e.GetPosition(skCanvas));
+            {
+                // USE THE RAW MOUSE POSITION directly from the unrotated skCanvas
+                Point rawMousePointWpf = e.GetPosition(skCanvas);
+                CheckMouseoverItems(rawMousePointWpf); // Pass the WPF Point directly
+            }
 
             if (e.RightButton == MouseButtonState.Pressed &&
                 _mouseOverItem is Player player &&
@@ -684,17 +1221,23 @@ namespace eft_dma_radar
 
             var currentPos = e.GetPosition(skCanvas);
 
+            // --- THIS IS THE BLOCK TO MODIFY ---
             if (_mouseDown && _freeMode && e.LeftButton == MouseButtonState.Pressed)
             {
+                // Calculate the raw, screen-space drag distance (same as mouseover system)
                 var deltaX = (float)(currentPos.X - _lastMousePosition.X);
                 var deltaY = (float)(currentPos.Y - _lastMousePosition.Y);
 
+                // The rest of the original code uses the (now correct) deltaX and deltaY
                 var zoomSensitivity = _currentZoom / 100f;
-                var minSensitivity = 0.1f;
+                var minSensitivity = 0.3f; // Increased from 0.1f
                 zoomSensitivity = Math.Max(zoomSensitivity, minSensitivity);
 
-                var adjustedDeltaX = deltaX * zoomSensitivity;
-                var adjustedDeltaY = deltaY * zoomSensitivity;
+                // Add a movement multiplier to make it more responsive
+                var movementMultiplier = 2.5f; // New multiplier for better responsiveness
+
+                var adjustedDeltaX = deltaX * zoomSensitivity * movementMultiplier;
+                var adjustedDeltaY = deltaY * zoomSensitivity * movementMultiplier;
 
                 _targetPanPosition.X -= adjustedDeltaX;
                 _targetPanPosition.Y -= adjustedDeltaY;
@@ -704,25 +1247,19 @@ namespace eft_dma_radar
                 return;
             }
 
-            if (!InRaid)
-            {
-                ClearRefs();
-                return;
-            }
-
+            if (!InRaid) { ClearRefs(); return; }
             var items = MouseOverItems;
-            if (items?.Any() != true)
-            {
-                ClearRefs();
-                return;
-            }
+            if (items?.Any() != true) { ClearRefs(); return; }
 
-            var mouse = new Vector2((float)currentPos.X, (float)currentPos.Y);
+            // USE THE RAW MOUSE POSITION directly from the unrotated skCanvas
+            Point currentRawMousePosWpf = e.GetPosition(skCanvas);
+            var mouse = new Vector2((float)currentRawMousePosWpf.X, (float)currentRawMousePosWpf.Y);
+
             var closest = items.Aggregate(
-                (x1, x2) => Vector2.Distance(x1.MouseoverPosition, mouse)
+                (x1, x2) => Vector2.Distance(x1.MouseoverPosition, mouse) // MouseoverPosition is in Skia canvas coords
                             < Vector2.Distance(x2.MouseoverPosition, mouse)
                         ? x1
-                        : x2); // Get object 'closest' to mouse position
+                        : x2);
 
             if (Vector2.Distance(closest.MouseoverPosition, mouse) >= 12)
             {
@@ -965,8 +1502,8 @@ namespace eft_dma_radar
                 if (label is null)
                     return;
 
-                var width = (float)skCanvas.CanvasSize.Width;
-                var height = (float)skCanvas.CanvasSize.Height;
+                var width = (float)skCanvas.ActualWidth;
+                var height = (float)skCanvas.ActualHeight;
                 var labelWidth = SKPaints.TextStatusSmall.MeasureText(label);
                 var spacing = 1f * UIScale;
                 var top = spacing; // Start from top of the canvas
@@ -1029,10 +1566,30 @@ namespace eft_dma_radar
             }
         }
 
+        /// <summary>
+        /// Periodic widget update timer - ESP at 60 FPS, others at 10 FPS
+        /// </summary>
+        private void WidgetUpdateTimer_Tick(object sender, EventArgs e)
+        {
+            try
+            {
+                // Only update widgets if they exist and we're not actively interacting
+                if (_widgetElements.Count > 0)
+                {
+                    InvalidateWidgetsThrottled();
+                }
+            }
+            catch (Exception ex)
+            {
+                LoneLogging.WriteLine($"Widget update timer error: {ex.Message}");
+            }
+        }
+
         private async void InitializeCanvas()
         {
             _renderTimer.Start();
             _fpsSw.Start();
+            _widgetUpdateTimer.Start(); // Start the slower widget update timer
 
             while (skCanvas.GRContext is null)
                 await Task.Delay(25);
@@ -1058,29 +1615,24 @@ namespace eft_dma_radar
         /// </summary>
         private void SetupWidgets()
         {
-            var left = 2;
-            var top = 0;
+            // Initialize default positions if config values are empty/invalid
+            var canvasWidth = (float)skCanvas.ActualWidth;
+            var canvasHeight = (float)skCanvas.ActualHeight;
+            
+            // Set default positions only if config values are not set or are invalid
+            if (Config.Widgets.AimviewLocation.IsEmpty || Config.Widgets.AimviewLocation.Width <= 0 || Config.Widgets.AimviewLocation.Height <= 0)
+                Config.Widgets.AimviewLocation = new SKRect(2, canvasHeight - 200, 202, canvasHeight);
+                
+            if (Config.Widgets.PlayerInfoLocation.IsEmpty || Config.Widgets.PlayerInfoLocation.Width <= 0 || Config.Widgets.PlayerInfoLocation.Height <= 0)
+                Config.Widgets.PlayerInfoLocation = new SKRect(canvasWidth - 200, 45, canvasWidth, 200);
+                
+            if (Config.Widgets.DebugInfoLocation.IsEmpty || Config.Widgets.DebugInfoLocation.Width <= 0 || Config.Widgets.DebugInfoLocation.Height <= 0)
+                Config.Widgets.DebugInfoLocation = new SKRect(2, 0, 202, 150);
+                
+            if (Config.Widgets.LootInfoLocation.IsEmpty || Config.Widgets.LootInfoLocation.Width <= 0 || Config.Widgets.LootInfoLocation.Height <= 0)
+                Config.Widgets.LootInfoLocation = new SKRect(2, 200, 202, 350);
 
-            if (Config.Widgets.AimviewLocation == default)
-            {
-                var right = (float)skCanvas.ActualWidth;
-                var bottom = (float)skCanvas.ActualHeight;
-                Config.Widgets.AimviewLocation = new SKRect(left, bottom - 200, left + 200, bottom);
-            }
-            if (Config.Widgets.PlayerInfoLocation == default)
-            {
-                var right = (float)skCanvas.ActualWidth;
-                Config.Widgets.PlayerInfoLocation = new SKRect(right - 1, top + 45, right, top + 1);
-            }
-            if (Config.Widgets.DebugInfoLocation == default)
-            {
-                Config.Widgets.DebugInfoLocation = new SKRect(left, top, left, top);
-            }
-            if (Config.Widgets.LootInfoLocation == default)
-            {
-                Config.Widgets.LootInfoLocation = new SKRect(left, top + 45, left, top);
-            }
-
+            // Create widgets using config values (either loaded from config or defaults set above)
             _aimview = new EspWidget(skCanvas, Config.Widgets.AimviewLocation, Config.Widgets.AimviewMinimized, UIScale);
             _playerInfo = new PlayerInfoWidget(skCanvas, Config.Widgets.PlayerInfoLocation, Config.Widgets.PlayerInfoMinimized, UIScale);
             _debugInfo = new DebugInfoWidget(skCanvas, Config.Widgets.DebugInfoLocation, Config.Widgets.DebugInfoMinimized, UIScale);
@@ -1600,6 +2152,12 @@ namespace eft_dma_radar
         {
             Memory.RestartRadar = true;
         }
+        private void btnRotate_Click(object sender, RoutedEventArgs e)
+        {
+            MainWindow.RotationDegrees = (MainWindow.RotationDegrees + 90) % 360; // Use static access
+            skCanvasRotation.Angle = MainWindow.RotationDegrees; // Use static access
+            skCanvas.InvalidateVisual();
+        }
 
         private void btnFreeMode_Click(object sender, RoutedEventArgs e)
         {
@@ -1914,8 +2472,8 @@ namespace eft_dma_radar
                     EnsurePanelInBounds(panel.Panel, mainContentGrid);
                 }
 
-                if (customToolbar != null)
-                    EnsurePanelInBounds(customToolbar, mainContentGrid);
+                            if (customToolbar != null)
+                EnsurePanelInBounds(customToolbar, mainContentGrid, adjustSize: false);
 
                 LoneLogging.WriteLine("[PANELS] Ensured all panels are within window bounds");
             }
@@ -2023,7 +2581,6 @@ namespace eft_dma_radar
                 var toolbarConfig = Config.ToolbarPosition;
                 var originalLeft = toolbarConfig.Left;
                 var originalTop = toolbarConfig.Top;
-
                 var toolbarWidth = customToolbar?.ActualWidth > 0 ? customToolbar.ActualWidth : 200;
                 var toolbarHeight = customToolbar?.ActualHeight > 0 ? customToolbar.ActualHeight : 40;
 
@@ -2480,6 +3037,8 @@ namespace eft_dma_radar
                 Canvas.SetTop(customToolbar, 5);
             }
         }
+
+
 
         [EditorBrowsable(EditorBrowsableState.Advanced)]
         public IAsyncResult BeginInvoke(Action method)

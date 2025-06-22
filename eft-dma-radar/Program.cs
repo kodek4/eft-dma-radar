@@ -53,8 +53,8 @@ namespace eft_dma_radar
 {
     internal static class Program
     {
-        internal const string Name = "EFT DMA Radar";
-        internal const string Version = "1.2.0";
+        internal const string Name = "EFT DMA Radar | NikitaGay Edition";
+        internal const string Version = "1.2.1";
 
         /// <summary>
         /// Current application mode
@@ -230,7 +230,7 @@ namespace eft_dma_radar
                     {
                         var url = !string.IsNullOrEmpty(versionResult.ReleaseUrl)
                             ? versionResult.ReleaseUrl
-                            : "https://github.com/lone-dma/eft-dma-radar/releases";
+                            : "https://github.com/oskarstr/eft-dma-radar-nikitagay/releases";
 
                         Process.Start(new ProcessStartInfo
                         {
@@ -246,7 +246,7 @@ namespace eft_dma_radar
                         {
                             var url = !string.IsNullOrEmpty(versionResult.ReleaseUrl)
                                 ? versionResult.ReleaseUrl
-                                : "https://github.com/lone-dma/eft-dma-radar/releases";
+                                : "https://github.com/oskarstr/eft-dma-radar-nikitagay/releases";
 
                             System.Windows.Clipboard.SetText(url);
                             MessageBox.Show($"URL copied to clipboard:\n{url}",
@@ -254,7 +254,7 @@ namespace eft_dma_radar
                         }
                         catch
                         {
-                            MessageBox.Show("Please visit: https://github.com/lone-dma/eft-dma-radar/releases",
+                            MessageBox.Show("Please visit: https://github.com/oskarstr/eft-dma-radar-nikitagay/releases",
                                           "Manual Update", MessageBoxButton.OK, MessageBoxImage.Information);
                         }
                     }
@@ -384,7 +384,7 @@ namespace eft_dma_radar
                 loading.UpdateStatus("Starting DMA Connection...", 50);
                 MemoryInterface.ModuleInit();
 
-                loading.UpdateStatus("Loading Remaining Modules...", 75);
+                loading.UpdateStatus("Spanking Nikita...", 75);
                 FeatureManager.ModuleInit();
 
                 ResourceJanitor.ModuleInit(new Action(CleanupWindowResources));
@@ -408,7 +408,8 @@ namespace eft_dma_radar
             string iconCachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "eft-dma-radar", "Assets", "Icons", "Items");
 
             Directory.CreateDirectory(iconCachePath);
-
+            
+            // Cache item icons
             Parallel.ForEach(EftDataManager.AllItems.Keys, itemId =>
             {
                 try
@@ -468,7 +469,8 @@ namespace eft_dma_radar
         /// </summary>
         private static class GitHubVersionChecker
         {
-            private const string GITHUB_API_URL = "https://api.github.com/repos/lone-dma/eft-dma-radar/releases/latest";
+            // Updated to point to your fork
+            private const string GITHUB_API_URL = "https://api.github.com/repos/oskarstr/eft-dma-radar-nikitagay/releases/latest";
 
             private static readonly HttpClient _httpClient = new HttpClient();
             private static DateTime _lastCheck = DateTime.MinValue;

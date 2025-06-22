@@ -33,5 +33,6 @@ namespace eft_dma_shared.Common.Maps
         /// <param name="localPlayerMapPos"></param>
         /// <returns></returns>
         LoneMapParams GetParameters(SKGLElement element, int zoom, ref Vector2 localPlayerMapPos);
+        SKImage GetFirstLayerImage();
     }
 }

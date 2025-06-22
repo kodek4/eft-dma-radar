@@ -10,6 +10,16 @@ using Brushes = System.Windows.Media.Brushes;
 
 namespace eft_dma_radar.Converters
 {
+    public class DivideByTwoConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+        {
+            if (value is double d) return d / 2.0;
+            return 0;
+        }
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture)
+            => throw new NotImplementedException();
+    }
     public class ColorHexToBrushConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
