@@ -20,6 +20,13 @@ namespace eft_dma_radar.UI.SKWidgetControl
         private SKCanvas _espCanvas;
         private readonly float _textOffsetY;
         private readonly float _boxHalfSize;
+        
+        // FPS tracking
+        private DateTime _lastFrameTime = DateTime.UtcNow;
+        private float _currentFps = 0f;
+        private readonly Queue<float> _fpsHistory = new Queue<float>();
+        private const int FPS_HISTORY_SIZE = 10; // Average over last 10 frames
+        
         private static Config Config => Program.Config;
 
         public EspWidget(SKGLElement parent, SKRect location, bool minimized, float scale)
@@ -54,6 +61,22 @@ namespace eft_dma_radar.UI.SKWidgetControl
 
             try
             {
+                // Calculate FPS
+                var now = DateTime.UtcNow;
+                var deltaTime = (float)(now - _lastFrameTime).TotalMilliseconds;
+                _lastFrameTime = now;
+                
+                if (deltaTime > 0)
+                {
+                    var instantFps = 1000f / deltaTime;
+                    _fpsHistory.Enqueue(instantFps);
+                    
+                    if (_fpsHistory.Count > FPS_HISTORY_SIZE)
+                        _fpsHistory.Dequeue();
+                    
+                    _currentFps = _fpsHistory.Average();
+                }
+
                 var inRaid = InRaid;
                 var localPlayer = LocalPlayer;
 
@@ -63,7 +86,7 @@ namespace eft_dma_radar.UI.SKWidgetControl
                     var containerCount = Containers?.Count() ?? 0;
                     var lootCount = Loot?.Count() ?? 0;
                     
-                    var debugText = $"Containers: {containerCount}, Loot: {lootCount}";
+                    var debugText = $"FPS: {_currentFps:F1} | Containers: {containerCount}, Loot: {lootCount}";
                     _espCanvas.DrawText(debugText, new SKPoint(10, 20), TextESPWidgetLoot);
 
                     if (Config.ProcessLoot)
