@@ -59,10 +59,27 @@ namespace eft_dma_radar.UI.SKWidgetControl
 
                 if (inRaid && localPlayer != null)
                 {
+                    // Debug: Track container processing
+                    var containerCount = Containers?.Count() ?? 0;
+                    var lootCount = Loot?.Count() ?? 0;
+                    
+                    var debugText = $"Containers: {containerCount}, Loot: {lootCount}";
+                    _espCanvas.DrawText(debugText, new SKPoint(10, 20), TextESPWidgetLoot);
+
                     if (Config.ProcessLoot)
                     {
+                        var sw = System.Diagnostics.Stopwatch.StartNew();
                         DrawLoot(localPlayer);
+                        sw.Stop();
+                        var lootTime = sw.ElapsedMilliseconds;
+                        
+                        sw.Restart();
                         DrawContainers(localPlayer);
+                        sw.Stop();
+                        var containerTime = sw.ElapsedMilliseconds;
+                        
+                        var timingText = $"Loot: {lootTime}ms, Containers: {containerTime}ms";
+                        _espCanvas.DrawText(timingText, new SKPoint(10, 40), TextESPWidgetLoot);
                     }
 
                     DrawPlayers();

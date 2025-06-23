@@ -130,11 +130,15 @@ namespace eft_dma_radar.Tarkov.GameWorld.Exits
                 return;
 
             var heightDiff = Position.Y - localPlayer.Position.Y;
-            var paint = GetPaint();
             var point = Position.ToMapPos(mapParams.Map).ToZoomedPos(mapParams);
             MouseoverPosition = new Vector2(point.X, point.Y);
 
             SKPaints.ShapeOutline.StrokeWidth = 1f;
+
+            // Get alpha-adjusted paints for height-aware transparency
+            var paints = HeightAwareAlphaManager.GetEntityPaintsFromSingle(
+                GetPaint(), SKPaints.TextLoot, SKPaints.ShapeOutline, SKPaints.TextOutline,
+                Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
 
             float distanceYOffset;
             float nameXOffset = 7f * MainWindow.UIScale;
@@ -149,24 +153,24 @@ namespace eft_dma_radar.Tarkov.GameWorld.Exits
             if (heightDiff > HEIGHT_INDICATOR_THRESHOLD)
             {
                 using var path = point.GetUpArrow(5f);
-                canvas.DrawPath(path, SKPaints.ShapeOutline);
-                canvas.DrawPath(path, paint);
+                canvas.DrawPath(path, paints.ShapeOutline);
+                canvas.DrawPath(path, paints.ShapeFill);
                 distanceYOffset = 18f * MainWindow.UIScale;
                 nameYOffset = 6f * MainWindow.UIScale;
             }
             else if (heightDiff < -HEIGHT_INDICATOR_THRESHOLD)
             {
                 using var path = point.GetDownArrow(5f);
-                canvas.DrawPath(path, SKPaints.ShapeOutline);
-                canvas.DrawPath(path, paint);
+                canvas.DrawPath(path, paints.ShapeOutline);
+                canvas.DrawPath(path, paints.ShapeFill);
                 distanceYOffset = 12f * MainWindow.UIScale;
                 nameYOffset = 1f * MainWindow.UIScale;
             }
             else
             {
                 var size = 4.75f * MainWindow.UIScale;
-                canvas.DrawRect(point.X - size / 2, point.Y - size / 2, size, size, SKPaints.ShapeOutline);
-                canvas.DrawRect(point.X - size / 2, point.Y - size / 2, size, size, paint);
+                canvas.DrawRect(point.X - size / 2, point.Y - size / 2, size, size, paints.ShapeOutline);
+                canvas.DrawRect(point.X - size / 2, point.Y - size / 2, size, size, paints.ShapeFill);
                 distanceYOffset = 16f * MainWindow.UIScale;
                 nameYOffset = 4f * MainWindow.UIScale;
             }
@@ -175,20 +179,20 @@ namespace eft_dma_radar.Tarkov.GameWorld.Exits
             {
                 var namePoint = point;
                 namePoint.Offset(nameXOffset, nameYOffset);
-                canvas.DrawText(Name, namePoint, SKPaints.TextOutline);
-                canvas.DrawText(Name, namePoint, SKPaints.TextLoot);
+                canvas.DrawText(Name, namePoint, paints.TextOutline);
+                canvas.DrawText(Name, namePoint, paints.TextFill);
             }
 
             if (Settings.ShowDistance)
             {
                 var distText = $"{(int)dist}m";
-                var distWidth = SKPaints.TextLoot.MeasureText($"{(int)dist}");
+                var distWidth = paints.TextFill.MeasureText($"{(int)dist}");
                 var distPoint = new SKPoint(
                     point.X - (distWidth / 2),
                     point.Y + distanceYOffset
                 );
-                canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
-                canvas.DrawText(distText, distPoint, SKPaints.TextLoot);
+                canvas.DrawText(distText, distPoint, paints.TextOutline);
+                canvas.DrawText(distText, distPoint, paints.TextFill);
             }
             canvas.Restore();
         }

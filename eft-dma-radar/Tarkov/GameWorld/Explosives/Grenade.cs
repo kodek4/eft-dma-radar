@@ -134,12 +134,17 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
 
             SKPaints.ShapeOutline.StrokeWidth = SKPaints.PaintExplosives.StrokeWidth + 2f * MainWindow.UIScale;
             var size = 5 * MainWindow.UIScale;
-            canvas.DrawCircle(point, size, SKPaints.ShapeOutline);
 
             var paintToUse = isPlayerInDanger ? SKPaints.PaintExplosivesDanger : SKPaints.PaintExplosives;
             var textPaintToUse = isPlayerInDanger ? SKPaints.TextExplosivesDanger : SKPaints.TextExplosives;
 
-            canvas.DrawCircle(point, size, paintToUse);
+            // Get alpha-adjusted paints for height-aware transparency
+            var paints = HeightAwareAlphaManager.GetEntityPaintsFromSingle(
+                paintToUse, textPaintToUse, SKPaints.ShapeOutline, SKPaints.TextOutline,
+                Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
+
+            canvas.DrawCircle(point, size, paints.ShapeOutline);
+            canvas.DrawCircle(point, size, paints.ShapeFill);
 
             if (Settings.ShowRadius && EffectiveDistance > 0)
             {
@@ -182,20 +187,20 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
             if (Settings.ShowName && !string.IsNullOrEmpty(Name))
             {
                 var namePoint = new SKPoint(point.X + nameXOffset, point.Y + nameYOffset);
-                canvas.DrawText(Name, namePoint, SKPaints.TextOutline);
-                canvas.DrawText(Name, namePoint, textPaintToUse);
+                canvas.DrawText(Name, namePoint, paints.TextOutline);
+                canvas.DrawText(Name, namePoint, paints.TextFill);
             }
 
             if (Settings.ShowDistance)
             {
                 var distText = $"{(int)dist}m";
-                var distWidth = SKPaints.TextExplosives.MeasureText($"{(int)dist}");
+                var distWidth = paints.TextFill.MeasureText($"{(int)dist}");
                 var distPoint = new SKPoint(
                     point.X - (distWidth / 2),
                     point.Y + distanceYOffset
                 );
-                canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
-                canvas.DrawText(distText, distPoint, textPaintToUse);
+                canvas.DrawText(distText, distPoint, paints.TextOutline);
+                canvas.DrawText(distText, distPoint, paints.TextFill);
             }
             canvas.Restore();
         }

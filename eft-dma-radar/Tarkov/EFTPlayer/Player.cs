@@ -1277,6 +1277,18 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                     return;
                 }
                 
+                // Special handling for local player - no height-aware alpha needed (height diff is always 0)
+                if (this == localPlayer)
+                {
+                    DrawPlayerMarker(canvas, localPlayer, point, typeSettings);
+                    var localHeight = Position.Y - localPlayer.Position.Y;
+                    if (typeSettings.ShowHeight && typeSettings.HeightIndicator)
+                    {
+                        DrawAlternateHeightIndicator(canvas, point, localHeight, GetPaints(null));
+                    }
+                    return;
+                }
+                
                 DrawPlayerMarker(canvas, localPlayer, point, typeSettings);
 
                 var height = Position.Y - localPlayer.Position.Y;
@@ -1284,10 +1296,13 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 // Draw height indicators even in battlemode
                 if (typeSettings.ShowHeight && typeSettings.HeightIndicator)
                 {
-                    DrawAlternateHeightIndicator(canvas, point, height, GetPaints(null));
+                    var paints = HeightAwareAlphaManager.GetPlayerPaintsFromTuple(
+                        GetPaints(null), SKPaints.ShapeOutline, SKPaints.TextOutline,
+                        Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
+                    DrawAlternateHeightIndicator(canvas, point, height, (paints.ShapeFill, paints.TextFill));
                 }
 
-                if (this == localPlayer || BattleMode)
+                if (BattleMode)
                     return;
 
                 string nameText = null;
@@ -1336,7 +1351,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 if (typeSettings.ShowTag && !string.IsNullOrEmpty(Alerts))
                     rightSideInfo.Add(Alerts);
 
-                DrawPlayerText(canvas, point, nameText, distanceText, heightText, rightSideInfo, hasImportantItems);
+                DrawPlayerText(canvas, point, nameText, distanceText, heightText, rightSideInfo, hasImportantItems, localPlayer);
             }
             catch (Exception ex)
             {
@@ -1378,7 +1393,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
         private void DrawPlayerText(SKCanvas canvas, SKPoint point,
                                       string nameText, string distanceText,
                                       string heightText, List<string> rightSideInfo,
-                                      bool hasImportantItems)
+                                      bool hasImportantItems, ILocalPlayer localPlayer)
         {
             //counter rotation text
             canvas.Save();
@@ -1386,7 +1401,10 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
             var counterRotation = SKMatrix.CreateRotationDegrees(-MainWindow.RotationDegrees, point.X, point.Y);
             canvas.Concat(ref counterRotation);
 
-            var paints = GetPaints(null);
+            var alphaPaints = HeightAwareAlphaManager.GetPlayerPaintsFromTuple(
+                GetPaints(null), SKPaints.ShapeOutline, SKPaints.TextOutline,
+                Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
+            var paints = (alphaPaints.ShapeFill, alphaPaints.TextFill);
 
             if (MainWindow.MouseoverGroup is int grp && grp == GroupID)
                 paints.Item2 = SKPaints.TextMouseoverGroup;
@@ -1404,7 +1422,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 var nameWidth = paints.Item2.MeasureText(nameText);
                 var namePoint = new SKPoint(point.X - (nameWidth / 2), baseYPosition - 0);
 
-                canvas.DrawText(nameText, namePoint, SKPaints.TextOutline);
+                canvas.DrawText(nameText, namePoint, alphaPaints.TextOutline);
                 canvas.DrawText(nameText, namePoint, paints.Item2);
 
                 if (showImportantIndicator)
@@ -1437,7 +1455,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 var distWidth = paints.Item2.MeasureText(distanceText);
                 var distPoint = new SKPoint(point.X - (distWidth / 2), point.Y + 20 * MainWindow.UIScale);
 
-                canvas.DrawText(distanceText, distPoint, SKPaints.TextOutline);
+                canvas.DrawText(distanceText, distPoint, alphaPaints.TextOutline);
                 canvas.DrawText(distanceText, distPoint, paints.Item2);
             }
 
@@ -1446,7 +1464,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 var heightWidth = paints.Item2.MeasureText(heightText);
                 var heightPoint = new SKPoint(point.X - heightWidth - 15 * MainWindow.UIScale, point.Y + 5 * MainWindow.UIScale);
 
-                canvas.DrawText(heightText, heightPoint, SKPaints.TextOutline);
+                canvas.DrawText(heightText, heightPoint, alphaPaints.TextOutline);
                 canvas.DrawText(heightText, heightPoint, paints.Item2);
             }
 
@@ -1462,7 +1480,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                     if (string.IsNullOrEmpty(line?.Trim()))
                         continue;
 
-                    canvas.DrawText(line, rightPoint, SKPaints.TextOutline);
+                    canvas.DrawText(line, rightPoint, alphaPaints.TextOutline);
                     canvas.DrawText(line, rightPoint, paints.Item2);
                     rightPoint.Offset(0, textSize);
                 }
@@ -1476,15 +1494,32 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
         private void DrawPlayerMarker(SKCanvas canvas, ILocalPlayer localPlayer, SKPoint point, PlayerTypeSettings typeSettings)
         {
             var radians = MapRotation.ToRadians();
-            var paints = GetPaints(null);
+            
+            // For local player, skip height-aware alpha since height difference is always 0
+            ValueTuple<SKPaint, SKPaint> paints;
+            SKPaint shapeOutlinePaint;
+            
+            if (this == localPlayer)
+            {
+                paints = GetPaints(null);
+                shapeOutlinePaint = SKPaints.ShapeOutline;
+            }
+            else
+            {
+                var alphaPaints = HeightAwareAlphaManager.GetPlayerPaintsFromTuple(
+                    GetPaints(null), SKPaints.ShapeOutline, SKPaints.TextOutline,
+                    Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
+                paints = (alphaPaints.ShapeFill, alphaPaints.TextFill);
+                shapeOutlinePaint = alphaPaints.ShapeOutline;
+            }
 
             if (this != localPlayer && MainWindow.MouseoverGroup is int grp && grp == GroupID)
                 paints.Item1 = SKPaints.PaintMouseoverGroup;
 
-            SKPaints.ShapeOutline.StrokeWidth = paints.Item1.StrokeWidth + 2f * MainWindow.UIScale;
+            shapeOutlinePaint.StrokeWidth = paints.Item1.StrokeWidth + 2f * MainWindow.UIScale;
 
             var size = 6 * MainWindow.UIScale;
-            canvas.DrawCircle(point, size, SKPaints.ShapeOutline);
+            canvas.DrawCircle(point, size, shapeOutlinePaint);
             canvas.DrawCircle(point, size, paints.Item1);
 
             var aimlineLength = typeSettings.AimlineLength;
@@ -1503,7 +1538,7 @@ namespace eft_dma_radar.Tarkov.EFTPlayer
                 aimlineLength = 9999;
 
             var aimlineEnd = GetAimlineEndpoint(point, radians, aimlineLength);
-            canvas.DrawLine(point, aimlineEnd, SKPaints.ShapeOutline);
+            canvas.DrawLine(point, aimlineEnd, shapeOutlinePaint);
             canvas.DrawLine(point, aimlineEnd, paints.Item1);
         }
 

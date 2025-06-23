@@ -274,6 +274,13 @@ namespace eft_dma_radar.UI.Misc
         public ContainersConfig Containers { get; set; } = new();
 
         /// <summary>
+        /// Height-aware alpha configuration for entities and players.
+        /// </summary>
+        [JsonInclude]
+        [JsonPropertyName("heightAwareAlpha")]
+        public HeightAwareAlphaConfig HeightAwareAlpha { get; set; } = new();
+
+        /// <summary>
         /// Contains cache data between program sessions.
         /// </summary>
         [JsonInclude]
@@ -658,6 +665,9 @@ namespace eft_dma_radar.UI.Misc
                 try { var temp = config.Widgets.LootInfoLocation; }
                 catch { config.Widgets.LootInfoLocation = new SKRect(0, 0, 300, 300); }
             }
+
+            if (config.HeightAwareAlpha == null)
+                config.HeightAwareAlpha = new HeightAwareAlphaConfig();
 
             if (config.Containers != null)
             {
@@ -2452,5 +2462,61 @@ namespace eft_dma_radar.UI.Misc
         [JsonPropertyName("cache")]
         [JsonInclude]
         public ConcurrentDictionary<string, ProfileData> Profiles { get; private set; } = new();
+    }
+
+    /// <summary>
+    /// Configuration for height-aware alpha feature
+    /// </summary>
+    public sealed class HeightAwareAlphaConfig
+    {
+        /// <summary>
+        /// Enable height-aware alpha for entities
+        /// </summary>
+        [JsonPropertyName("entityEnabled")]
+        public bool EntityEnabled { get; set; } = false;
+
+        /// <summary>
+        /// Enable height-aware alpha for players
+        /// </summary>
+        [JsonPropertyName("playerEnabled")]
+        public bool PlayerEnabled { get; set; } = false;
+
+        /// <summary>
+        /// Enable dynamic gradient based on distance to target height
+        /// </summary>
+        [JsonPropertyName("entityDynamicGradient")]
+        public bool EntityDynamicGradient { get; set; } = false;
+
+        /// <summary>
+        /// Enable dynamic gradient for players based on distance to target height
+        /// </summary>
+        [JsonPropertyName("playerDynamicGradient")]
+        public bool PlayerDynamicGradient { get; set; } = false;
+
+        /// <summary>
+        /// Minimum alpha value (0.0 to 1.0) for entities above/below threshold
+        /// </summary>
+        [JsonPropertyName("entityMinAlpha")]
+        public float EntityMinAlpha { get; set; } = 0.3f;
+
+        /// <summary>
+        /// Minimum alpha value (0.0 to 1.0) for players above/below threshold
+        /// </summary>
+        [JsonPropertyName("playerMinAlpha")]
+        public float PlayerMinAlpha { get; set; } = 0.3f;
+
+        /// <summary>
+        /// Height threshold in meters for triggering alpha reduction
+        /// Uses the same threshold as height indicators
+        /// </summary>
+        [JsonIgnore]
+        public float HeightThreshold => 1.85f;
+
+        /// <summary>
+        /// Maximum height difference for gradient calculation (beyond this, min alpha is used)
+        /// This is a constant value since there's no UI control for it
+        /// </summary>
+        [JsonIgnore]
+        public float MaxGradientDistance => 7.0f;
     }
 }

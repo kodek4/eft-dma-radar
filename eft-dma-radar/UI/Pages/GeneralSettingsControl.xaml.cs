@@ -622,6 +622,13 @@ namespace eft_dma_radar.UI.Pages
             sldrPlayerTypeRenderDistance.ValueChanged += GeneralSlider_ValueChanged;
             sldrPlayerTypeAimlineLength.ValueChanged += GeneralSlider_ValueChanged;
             ccbInformation.SelectionChanged += playerInfoCheckComboBox_SelectionChanged;
+            
+            // Height-Aware Alpha - Player
+            chkPlayerHeightAwareAlpha.Checked += GeneralCheckbox_Checked;
+            chkPlayerHeightAwareAlpha.Unchecked += GeneralCheckbox_Checked;
+            chkPlayerDynamicGradient.Checked += GeneralCheckbox_Checked;
+            chkPlayerDynamicGradient.Unchecked += GeneralCheckbox_Checked;
+            sldrPlayerMinAlpha.ValueChanged += GeneralSlider_ValueChanged;
 
             // Entity Information
             cboEntityType.SelectionChanged += cboEntityType_SelectionChanged;
@@ -637,6 +644,13 @@ namespace eft_dma_radar.UI.Pages
             chkShowTripwireLine.Unchecked += GeneralCheckbox_Checked;
             chkHideInactive.Checked += GeneralCheckbox_Checked;
             chkHideInactive.Unchecked += GeneralCheckbox_Checked;
+            
+            // Height-Aware Alpha - Entity
+            chkEntityHeightAwareAlpha.Checked += GeneralCheckbox_Checked;
+            chkEntityHeightAwareAlpha.Unchecked += GeneralCheckbox_Checked;
+            chkEntityDynamicGradient.Checked += GeneralCheckbox_Checked;
+            chkEntityDynamicGradient.Unchecked += GeneralCheckbox_Checked;
+            sldrEntityMinAlpha.ValueChanged += GeneralSlider_ValueChanged;
 
             // Monitor
             cboMonitor.SelectionChanged += GeneralComboBox_SelectionChanged;
@@ -698,6 +712,24 @@ namespace eft_dma_radar.UI.Pages
 
             InitializePlayerTypeSettings();
             InitializeEntityTypeSettings();
+            
+            // Load Height-Aware Alpha settings
+            LoadHeightAwareAlphaSettings();
+        }
+
+        private void LoadHeightAwareAlphaSettings()
+        {
+            // Player Height-Aware Alpha
+            chkPlayerHeightAwareAlpha.IsChecked = Config.HeightAwareAlpha.PlayerEnabled;
+            chkPlayerDynamicGradient.IsChecked = Config.HeightAwareAlpha.PlayerDynamicGradient;
+            chkPlayerDynamicGradient.IsEnabled = Config.HeightAwareAlpha.PlayerEnabled;
+            sldrPlayerMinAlpha.Value = Config.HeightAwareAlpha.PlayerMinAlpha;
+            
+            // Entity Height-Aware Alpha
+            chkEntityHeightAwareAlpha.IsChecked = Config.HeightAwareAlpha.EntityEnabled;
+            chkEntityDynamicGradient.IsChecked = Config.HeightAwareAlpha.EntityDynamicGradient;
+            chkEntityDynamicGradient.IsEnabled = Config.HeightAwareAlpha.EntityEnabled;
+            sldrEntityMinAlpha.Value = Config.HeightAwareAlpha.EntityMinAlpha;
         }
 
         private void InitializePlayerTypeSettings()
@@ -1374,12 +1406,28 @@ namespace eft_dma_radar.UI.Pages
                     case "AimlineWhenScoped":
                         SavePlayerTypeSettings();
                         break;
+                    case "PlayerHeightAwareAlpha":
+                        Config.HeightAwareAlpha.PlayerEnabled = value;
+                        // Also update the dynamic gradient checkbox state if needed
+                        chkPlayerDynamicGradient.IsEnabled = value;
+                        break;
+                    case "PlayerDynamicGradient":
+                        Config.HeightAwareAlpha.PlayerDynamicGradient = value;
+                        break;
                     case "ShowExplosiveRadius":
                     case "ShowLockedDoors":
                     case "ShowUnlockedDoors":
                     case "HideInactiveExfils":
                     case "ShowTripwireLine":
                         SaveEntityTypeSettings();
+                        break;
+                    case "EntityHeightAwareAlpha":
+                        Config.HeightAwareAlpha.EntityEnabled = value;
+                        // Also update the dynamic gradient checkbox state if needed
+                        chkEntityDynamicGradient.IsEnabled = value;
+                        break;
+                    case "EntityDynamicGradient":
+                        Config.HeightAwareAlpha.EntityDynamicGradient = value;
                         break;
                     case "RefreshMonitors":
                         InitMonitors();
@@ -1502,6 +1550,12 @@ namespace eft_dma_radar.UI.Pages
                         SavePlayerTypeSettings(); break;
                     case "EntityTypeRenderDistance":
                         SaveEntityTypeSettings(); break;
+                    case "PlayerMinAlpha":
+                        Config.HeightAwareAlpha.PlayerMinAlpha = floatValue;
+                        break;
+                    case "EntityMinAlpha":
+                        Config.HeightAwareAlpha.EntityMinAlpha = floatValue;
+                        break;
                 }
 
                 Config.Save();

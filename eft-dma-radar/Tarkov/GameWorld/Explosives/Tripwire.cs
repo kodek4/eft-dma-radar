@@ -3,6 +3,7 @@ using eft_dma_radar.UI.ESP;
 using eft_dma_radar.UI.Misc;
 using eft_dma_shared.Common.ESP;
 using eft_dma_shared.Common.Maps;
+using eft_dma_shared.Common.Misc;
 using eft_dma_shared.Common.Misc.Data;
 using eft_dma_shared.Common.Players;
 using eft_dma_shared.Common.Unity;
@@ -133,6 +134,11 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
 
             SKPaints.PaintExplosives.StrokeWidth = lineWidth;
 
+            // Get alpha-adjusted paints for height-aware transparency
+            var paints = HeightAwareAlphaManager.GetEntityPaintsFromSingle(
+                SKPaints.PaintExplosives, SKPaints.TextExplosives, SKPaints.ShapeOutline, SKPaints.TextOutline,
+                Position, localPlayer.Position, Program.Config.HeightAwareAlpha);
+
             canvas.Save();
 
             // Create a matrix to counter-rotate around the loot item's icon position.
@@ -144,45 +150,45 @@ namespace eft_dma_radar.Tarkov.GameWorld.Explosives
 
             if (Settings.ShowTripwireLine)
             {
-                SKPaints.ShapeOutline.StrokeWidth = lineWidth + 1f * MainWindow.UIScale;
-                canvas.DrawLine(fromPosition, toPosition, SKPaints.ShapeOutline);
-                canvas.DrawLine(fromPosition, toPosition, SKPaints.PaintExplosives);
+                paints.ShapeOutline.StrokeWidth = lineWidth + 1f * MainWindow.UIScale;
+                canvas.DrawLine(fromPosition, toPosition, paints.ShapeOutline);
+                canvas.DrawLine(fromPosition, toPosition, paints.ShapeFill);
             }
 
-            SKPaints.ShapeOutline.StrokeWidth = 2f * MainWindow.UIScale;
+            paints.ShapeOutline.StrokeWidth = 2f * MainWindow.UIScale;
 
-            canvas.DrawCircle(toPosition, size, SKPaints.ShapeOutline);
-            canvas.DrawCircle(toPosition, size, SKPaints.PaintExplosives);
+            canvas.DrawCircle(toPosition, size, paints.ShapeOutline);
+            canvas.DrawCircle(toPosition, size, paints.ShapeFill);
 
             if (Settings.ShowTripwireLine)
             {
-                canvas.DrawCircle(fromPosition, size, SKPaints.ShapeOutline);
-                canvas.DrawCircle(fromPosition, size, SKPaints.PaintExplosives);
+                canvas.DrawCircle(fromPosition, size, paints.ShapeOutline);
+                canvas.DrawCircle(fromPosition, size, paints.ShapeFill);
             }
 
             if (Settings.ShowName && !string.IsNullOrEmpty(Name))
             {
-                var nameWidth = SKPaints.TextExplosives.MeasureText(Name);
+                var nameWidth = paints.TextFill.MeasureText(Name);
                 var namePoint = new SKPoint(
                     toPosition.X - (nameWidth / 2),
                     toPosition.Y - 10f * MainWindow.UIScale
                 );
 
-                canvas.DrawText(Name, namePoint, SKPaints.TextOutline);
-                canvas.DrawText(Name, namePoint, SKPaints.TextExplosives);
+                canvas.DrawText(Name, namePoint, paints.TextOutline);
+                canvas.DrawText(Name, namePoint, paints.TextFill);
             }
 
             if (Settings.ShowDistance)
             {
                 var distText = $"{(int)dist}m";
-                var distWidth = SKPaints.TextExplosives.MeasureText($"{(int)dist}");
+                var distWidth = paints.TextFill.MeasureText($"{(int)dist}");
                 var distPoint = new SKPoint(
                     toPosition.X - (distWidth / 2),
                     toPosition.Y + 18f * MainWindow.UIScale
                 );
 
-                canvas.DrawText(distText, distPoint, SKPaints.TextOutline);
-                canvas.DrawText(distText, distPoint, SKPaints.TextExplosives);
+                canvas.DrawText(distText, distPoint, paints.TextOutline);
+                canvas.DrawText(distText, distPoint, paints.TextFill);
             }
             canvas.Restore();
         }

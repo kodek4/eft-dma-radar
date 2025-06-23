@@ -230,6 +230,47 @@
                                                           hc:TitleElement.Title="Information"
                                                           hc:TitleElement.TitlePlacement="Top"
                                                           hc:InfoElement.Placeholder="Name, Health, Height, Distance, Tag..."/>
+
+                                    <!-- Height-Aware Alpha Settings -->
+                                    <GroupBox Header="Height-Aware Alpha" Style="{StaticResource TransparentGroupBoxStyle}"
+                                              Padding="5,0,5,5" Margin="0,10,0,0">
+                                        <hc:SimpleStackPanel Margin="0,5,0,0">
+                                            <!-- Enable Height-Aware Alpha -->
+                                            <Grid Margin="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox x:Name="chkPlayerHeightAwareAlpha" Content="Height Aware Alpha" 
+                                                          Style="{StaticResource DynamicCheckBoxStyle}" 
+                                                          Grid.Column="0" Tag="PlayerHeightAwareAlpha"
+                                                          ToolTip="Reduce opacity of players above/below you"/>
+                                                <CheckBox x:Name="chkPlayerDynamicGradient" Content="Dynamic Gradient" 
+                                                          Style="{StaticResource DynamicCheckBoxStyle}" 
+                                                          Grid.Column="1" Tag="PlayerDynamicGradient"
+                                                          ToolTip="Gradually adjust opacity based on height distance"/>
+                                            </Grid>
+                                            
+                                            <!-- Minimum Alpha Slider -->
+                                            <Grid Margin="0,0,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <TextBlock Text="Min Alpha" Style="{StaticResource LabelText}" 
+                                                           VerticalAlignment="Center" Grid.Column="0"/>
+                                                <controls:TextValueSlider
+                                                    x:Name="sldrPlayerMinAlpha" Tag="PlayerMinAlpha"
+                                                    Minimum="0.1" Maximum="1.0"
+                                                    MinContent="10%" MaxContent="100%"
+                                                    SmallChange="0.1" TickFrequency="0.1"
+                                                    IsSnapToTickEnabled="True"
+                                                    ContentStringFormat="{}{0:P0}" 
+                                                    Grid.Column="1"/>
+                                            </Grid>
+                                        </hc:SimpleStackPanel>
+                                    </GroupBox>
                                 </hc:SimpleStackPanel>
                             </Expander>
 
@@ -315,6 +356,47 @@
                                                       hc:TitleElement.Title="Information"
                                                       hc:TitleElement.TitlePlacement="Top"
                                                       hc:InfoElement.Placeholder="Name, Distance, Height, Value..."/>
+
+                                    <!-- Height-Aware Alpha Settings -->
+                                    <GroupBox Header="Height-Aware Alpha" Style="{StaticResource TransparentGroupBoxStyle}"
+                                              Padding="5,0,5,5" Margin="0,10,0,0">
+                                        <hc:SimpleStackPanel Margin="0,5,0,0">
+                                            <!-- Enable Height-Aware Alpha -->
+                                            <Grid Margin="0,0,0,8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox x:Name="chkEntityHeightAwareAlpha" Content="Height Aware Alpha" 
+                                                          Style="{StaticResource DynamicCheckBoxStyle}" 
+                                                          Grid.Column="0" Tag="EntityHeightAwareAlpha"
+                                                          ToolTip="Reduce opacity of entities above/below you"/>
+                                                <CheckBox x:Name="chkEntityDynamicGradient" Content="Dynamic Gradient" 
+                                                          Style="{StaticResource DynamicCheckBoxStyle}" 
+                                                          Grid.Column="1" Tag="EntityDynamicGradient"
+                                                          ToolTip="Gradually adjust opacity based on height distance"/>
+                                            </Grid>
+                                            
+                                            <!-- Minimum Alpha Slider -->
+                                            <Grid Margin="0,0,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <TextBlock Text="Min Alpha" Style="{StaticResource LabelText}" 
+                                                           VerticalAlignment="Center" Grid.Column="0"/>
+                                                <controls:TextValueSlider
+                                                    x:Name="sldrEntityMinAlpha" Tag="EntityMinAlpha"
+                                                    Minimum="0.1" Maximum="1.0"
+                                                    MinContent="10%" MaxContent="100%"
+                                                    SmallChange="0.1" TickFrequency="0.1"
+                                                    IsSnapToTickEnabled="True"
+                                                    ContentStringFormat="{}{0:P0}" 
+                                                    Grid.Column="1"/>
+                                            </Grid>
+                                        </hc:SimpleStackPanel>
+                                    </GroupBox>
                                 </hc:SimpleStackPanel>
                             </Expander>
 
