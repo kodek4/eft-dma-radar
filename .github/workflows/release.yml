@@ -1,9 +1,43 @@
 name: Create Release
 
 on:
+  # Manual trigger - preferred method for custom release notes
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+      release_notes:
+        description: 'Custom release notes (supports markdown)'
+        required: true
+        type: string
+        default: |
+          ## What's New
+          
+          ### Features
+          - 
+          
+          ### Improvements
+          - 
+          
+          ### Bug Fixes
+          - 
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+      test_mode:
+        description: 'Test mode (creates draft release)'
+        required: false
+        type: boolean
+        default: false
+  
+  # Automatic trigger on tag push (fallback)
   push:
     tags:
-      - 'v*'  # Triggers on version tags like v1.2.1, v1.3.0, etc.
+      - 'v*'
 
 jobs:
   build-and-release:
@@ -16,44 +50,109 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '8.0.x'
+        dotnet-version: '9.0.x'
         
     - name: Restore dependencies
       run: dotnet restore
       
-    - name: Build and Publish
+    - name: Build EFT Project
       run: |
-        dotnet publish eft-dma-radar/eft-dma-radar.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o ./publish
+        dotnet publish eft-dma-radar/eft-dma-radar.csproj -c Release -r win-x64 --self-contained false -o ./eft-build
         
-    - name: Create ZIP archive
+    - name: Build Arena Project
       run: |
-        Compress-Archive -Path ./publish/* -DestinationPath ./EFT-DMA-Radar-NikitaGay-${{ github.ref_name }}.zip
+        dotnet publish arena-dma-radar/arena-dma-radar.csproj -c Release -r win-x64 --self-contained false -o ./arena-build
+        
+    - name: Create ZIP archives
+      run: |
+        $version = if ('${{ github.event.inputs.version }}') { '${{ github.event.inputs.version }}' } else { '${{ github.ref_name }}' }
+        $version = $version -replace '^v', ''
+        
+        Compress-Archive -Path ./eft-build/* -DestinationPath "./EFT-DMA-Radar-kodek4-v$version.zip"
+        Compress-Archive -Path ./arena-build/* -DestinationPath "./Arena-DMA-Radar-kodek4-v$version.zip"
+        
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        $version = if ('${{ github.event.inputs.version }}') { '${{ github.event.inputs.version }}' } else { '${{ github.ref_name }}' }
+        
+        if ('${{ github.event.inputs.release_notes }}') {
+          # Manual dispatch - use custom notes
+          $notes = @"
+        # EFT DMA Radar | kodek4 fork $version
+        
+        ${{ github.event.inputs.release_notes }}
+        
+        ## Downloads
+        
+        - **EFT DMA Radar**: Download `EFT-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
+        - **Arena DMA Radar**: Download `Arena-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
+        
+        ## Installation
+        
+        1. Download the appropriate ZIP file above
+        2. Extract to a folder
+        3. Run the executable (`eft-dma-radar.exe` or `arena-dma-radar.exe`)
+        
+        ## Requirements
+        
+        - Windows 10/11 x64
+        - .NET 9.0 Runtime
+        - DMA hardware setup
+        
+        ## Fork Features
+        
+        This fork includes:
+        - **Map Rotation System** - Full map rotation control via minibar interface
+        - **Height-Aware Alpha System** - Configurable opacity for entities at different elevations
+        - **Performance Enhancements** - Optimized rendering and FPS tracking
+        - **Arena Support** - Full Arena radar functionality
+        "@
+        } else {
+          # Tag-based - generate basic notes
+          $notes = @"
+        # EFT DMA Radar | kodek4 fork $version
+        
+        ## Downloads
+        
+        - **EFT DMA Radar**: Download `EFT-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
+        - **Arena DMA Radar**: Download `Arena-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
+        
+        ## Installation
+        
+        1. Download the appropriate ZIP file above
+        2. Extract to a folder  
+        3. Run the executable (`eft-dma-radar.exe` or `arena-dma-radar.exe`)
+        
+        ## Requirements
+        
+        - Windows 10/11 x64
+        - .NET 9.0 Runtime
+        - DMA hardware setup
+        
+        ## Fork Features
+        
+        This fork includes:
+        - **Map Rotation System** - Full map rotation control via minibar interface
+        - **Height-Aware Alpha System** - Configurable opacity for entities at different elevations  
+        - **Performance Enhancements** - Optimized rendering and FPS tracking
+        - **Arena Support** - Full Arena radar functionality
+        "@
+        }
+        
+        $notes | Out-File -FilePath release_notes.txt -Encoding utf8
+        echo "notes_file=release_notes.txt" >> $env:GITHUB_OUTPUT
         
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        name: "EFT DMA Radar NikitaGay Edition ${{ github.ref_name }}"
-        body: |
-          ## EFT DMA Radar | NikitaGay Edition ${{ github.ref_name }}
-          
-          ### Custom Features:
-          - 🔄 **Map Rotation System** - Rotate radar maps with full compensation
-          - 📏 **Height Indicators** - See player elevation in battle mode  
-          - 🎨 **Custom Branding** - "Spanking Nikita..." loading messages
-          - ⚡ **Performance Optimizations** - Enhanced ESP widget performance
-          
-          ### Installation:
-          1. Download the ZIP file below
-          2. Extract to a folder
-          3. Run `eft-dma-radar.exe`
-          
-          ### Requirements:
-          - Windows 10/11
-          - DMA hardware setup
-          
+        tag_name: ${{ github.event.inputs.version || github.ref_name }}
+        name: "EFT DMA Radar | kodek4 fork ${{ github.event.inputs.version || github.ref_name }}"
+        body_path: ${{ steps.release_notes.outputs.notes_file }}
         files: |
-          ./EFT-DMA-Radar-NikitaGay-${{ github.ref_name }}.zip
-        draft: false
-        prerelease: false
+          ./EFT-DMA-Radar-kodek4-*.zip
+          ./Arena-DMA-Radar-kodek4-*.zip
+        draft: ${{ github.event.inputs.test_mode || false }}
+        prerelease: ${{ github.event.inputs.prerelease || false }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
