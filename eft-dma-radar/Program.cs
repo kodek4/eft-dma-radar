@@ -53,8 +53,8 @@ namespace eft_dma_radar
 {
     internal static class Program
     {
-        internal const string Name = "EFT DMA Radar | NikitaGay Edition";
-        internal const string Version = "1.2.2";
+        internal const string Name = "EFT DMA Radar | kodek4 fork";
+        internal const string Version = "1.2.3";
 
         /// <summary>
         /// Current application mode
