@@ -8,21 +8,26 @@ on:
         description: 'Release version (e.g., v1.2.3)'
         required: true
         type: string
-      release_notes:
-        description: 'Custom release notes (supports markdown)'
-        required: true
+      features:
+        description: 'New features (one per line, no bullets needed)'
+        required: false
         type: string
-        default: |
-          ## What's New
-          
-          ### Features
-          - 
-          
-          ### Improvements
-          - 
-          
-          ### Bug Fixes
-          - 
+        default: ''
+      improvements:
+        description: 'Improvements (one per line, no bullets needed)'
+        required: false
+        type: string
+        default: ''
+      bugfixes:
+        description: 'Bug fixes (one per line, no bullets needed)'
+        required: false
+        type: string
+        default: ''
+      other_notes:
+        description: 'Additional notes (optional)'
+        required: false
+        type: string
+        default: ''
       prerelease:
         description: 'Mark as pre-release'
         required: false
@@ -84,25 +89,59 @@ jobs:
       run: |
         $version = if ('${{ github.event.inputs.version }}') { '${{ github.event.inputs.version }}' } else { '${{ github.ref_name }}' }
         
-        if ('${{ github.event.inputs.release_notes }}') {
-          # Manual dispatch - use custom notes
-          $notes = @"
-        ${{ github.event.inputs.release_notes }}
-        
+        if ('${{ github.event.inputs.features }}' -or '${{ github.event.inputs.improvements }}' -or '${{ github.event.inputs.bugfixes }}' -or '${{ github.event.inputs.other_notes }}') {
+          # Manual dispatch - build notes from separate inputs
+          $notes = "## What's New`n`n"
+          
+          # Features section
+          if ('${{ github.event.inputs.features }}') {
+            $notes += "### Features`n"
+            '${{ github.event.inputs.features }}'.Split("`n") | ForEach-Object {
+              if ($_.Trim()) { $notes += "- $($_.Trim())`n" }
+            }
+            $notes += "`n"
+          }
+          
+          # Improvements section  
+          if ('${{ github.event.inputs.improvements }}') {
+            $notes += "### Improvements`n"
+            '${{ github.event.inputs.improvements }}'.Split("`n") | ForEach-Object {
+              if ($_.Trim()) { $notes += "- $($_.Trim())`n" }
+            }
+            $notes += "`n"
+          }
+          
+          # Bug fixes section
+          if ('${{ github.event.inputs.bugfixes }}') {
+            $notes += "### Bug Fixes`n"
+            '${{ github.event.inputs.bugfixes }}'.Split("`n") | ForEach-Object {
+              if ($_.Trim()) { $notes += "- $($_.Trim())`n" }
+            }
+            $notes += "`n"
+          }
+          
+          # Other notes section
+          if ('${{ github.event.inputs.other_notes }}') {
+            $notes += '${{ github.event.inputs.other_notes }}'
+            $notes += "`n`n"
+          }
+          
+          # Downloads section
+          $notes += @"
         ## Downloads
         
-        - **EFT Build**: `EFT_DMA_v$($version -replace '^v', '')_kodek4.zip`
-        - **Arena Build**: `Arena_DMA_v$($version -replace '^v', '')_kodek4.zip`
-        - **Source Code**: `DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip`
+        - **EFT Build**: ``EFT_DMA_v$($version -replace '^v', '')_kodek4.zip``
+        - **Arena Build**: ``Arena_DMA_v$($version -replace '^v', '')_kodek4.zip``
+        - **Source Code**: ``DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip``
         "@
         } else {
           # Tag-based - generate basic notes
           $notes = @"
         ## Downloads
         
-        - **EFT Build**: `EFT_DMA_v$($version -replace '^v', '')_kodek4.zip`
-        - **Arena Build**: `Arena_DMA_v$($version -replace '^v', '')_kodek4.zip`
-        - **Source Code**: `DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip`
+        - **EFT Build**: ``EFT_DMA_v$($version -replace '^v', '')_kodek4.zip``
+        - **Arena Build**: ``Arena_DMA_v$($version -replace '^v', '')_kodek4.zip``
+        - **Source Code**: ``DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip``
         "@
         }
         
