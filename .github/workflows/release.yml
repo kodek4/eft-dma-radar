@@ -68,8 +68,16 @@ jobs:
         $version = if ('${{ github.event.inputs.version }}') { '${{ github.event.inputs.version }}' } else { '${{ github.ref_name }}' }
         $version = $version -replace '^v', ''
         
-        Compress-Archive -Path ./eft-build/* -DestinationPath "./EFT-DMA-Radar-kodek4-v$version.zip"
-        Compress-Archive -Path ./arena-build/* -DestinationPath "./Arena-DMA-Radar-kodek4-v$version.zip"
+        Compress-Archive -Path ./eft-build/* -DestinationPath "./EFT_DMA_v$version`_kodek4.zip"
+        Compress-Archive -Path ./arena-build/* -DestinationPath "./Arena_DMA_v$version`_kodek4.zip"
+        
+        # Create source code archive (exclude build artifacts and git)
+        $sourceFiles = Get-ChildItem -Path . -Recurse | Where-Object { 
+          $_.FullName -notmatch '\\(bin|obj|\.git|\.vs|\.cursor|Users)\\' -and
+          $_.FullName -notmatch '\\(eft-build|arena-build)\\' -and
+          $_.Name -notmatch '\.(user|tmp|temp|cache)$'
+        }
+        $sourceFiles | Compress-Archive -DestinationPath "./DMA_Radar_Source_v$version`_kodek4.zip"
         
     - name: Generate release notes
       id: release_notes
@@ -79,64 +87,22 @@ jobs:
         if ('${{ github.event.inputs.release_notes }}') {
           # Manual dispatch - use custom notes
           $notes = @"
-        # EFT DMA Radar | kodek4 fork $version
-        
         ${{ github.event.inputs.release_notes }}
         
         ## Downloads
         
-        - **EFT DMA Radar**: Download `EFT-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
-        - **Arena DMA Radar**: Download `Arena-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
-        
-        ## Installation
-        
-        1. Download the appropriate ZIP file above
-        2. Extract to a folder
-        3. Run the executable (`eft-dma-radar.exe` or `arena-dma-radar.exe`)
-        
-        ## Requirements
-        
-        - Windows 10/11 x64
-        - .NET 9.0 Runtime
-        - DMA hardware setup
-        
-        ## Fork Features
-        
-        This fork includes:
-        - **Map Rotation System** - Full map rotation control via minibar interface
-        - **Height-Aware Alpha System** - Configurable opacity for entities at different elevations
-        - **Performance Enhancements** - Optimized rendering and FPS tracking
-        - **Arena Support** - Full Arena radar functionality
+        - **EFT Build**: `EFT_DMA_v$($version -replace '^v', '')_kodek4.zip`
+        - **Arena Build**: `Arena_DMA_v$($version -replace '^v', '')_kodek4.zip`
+        - **Source Code**: `DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip`
         "@
         } else {
           # Tag-based - generate basic notes
           $notes = @"
-        # EFT DMA Radar | kodek4 fork $version
-        
         ## Downloads
         
-        - **EFT DMA Radar**: Download `EFT-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
-        - **Arena DMA Radar**: Download `Arena-DMA-Radar-kodek4-$($version -replace '^v', '').zip`
-        
-        ## Installation
-        
-        1. Download the appropriate ZIP file above
-        2. Extract to a folder  
-        3. Run the executable (`eft-dma-radar.exe` or `arena-dma-radar.exe`)
-        
-        ## Requirements
-        
-        - Windows 10/11 x64
-        - .NET 9.0 Runtime
-        - DMA hardware setup
-        
-        ## Fork Features
-        
-        This fork includes:
-        - **Map Rotation System** - Full map rotation control via minibar interface
-        - **Height-Aware Alpha System** - Configurable opacity for entities at different elevations  
-        - **Performance Enhancements** - Optimized rendering and FPS tracking
-        - **Arena Support** - Full Arena radar functionality
+        - **EFT Build**: `EFT_DMA_v$($version -replace '^v', '')_kodek4.zip`
+        - **Arena Build**: `Arena_DMA_v$($version -replace '^v', '')_kodek4.zip`
+        - **Source Code**: `DMA_Radar_Source_v$($version -replace '^v', '')_kodek4.zip`
         "@
         }
         
@@ -150,8 +116,9 @@ jobs:
         name: "EFT DMA Radar | kodek4 fork ${{ github.event.inputs.version || github.ref_name }}"
         body_path: ${{ steps.release_notes.outputs.notes_file }}
         files: |
-          ./EFT-DMA-Radar-kodek4-*.zip
-          ./Arena-DMA-Radar-kodek4-*.zip
+          ./EFT_DMA_v*_kodek4.zip
+          ./Arena_DMA_v*_kodek4.zip
+          ./DMA_Radar_Source_v*_kodek4.zip
         draft: ${{ github.event.inputs.test_mode || false }}
         prerelease: ${{ github.event.inputs.prerelease || false }}
       env:
